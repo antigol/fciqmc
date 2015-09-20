@@ -9,15 +9,44 @@
 
 using namespace std;
 
+#undef TIMING
+
 inline std::default_random_engine& global_random_engine()
 {
 	static std::random_device rdev;
 	static std::default_random_engine eng(rdev());
 	return eng;
 }
+
 inline double canonical()
 {
 	return std::generate_canonical<double, std::numeric_limits<double>::digits>(global_random_engine());
+}
+
+inline int random_round(double x)
+{
+	int a = floor(x);
+	if (canonical() < (x-a)) ++a;
+	return a;
+}
+
+int binomial_throw(int n, double p)
+{
+	if (n < 0) {
+		n = -n;
+		p = -p;
+	}
+	int a = floor(p);
+	binomial_distribution<int> distribution(n, p-a);
+	return n * a + distribution(global_random_engine());
+}
+
+template<class T>
+T clamp(T a, T x, T b)
+{
+	if (x < a) return a;
+	if (x > b) return b;
+	return x;
 }
 
 #define N 100
@@ -54,48 +83,40 @@ double hamiltonian_ij(const state_type& i, const state_type& j)
 	return 0.0;
 }
 
-int random_round(double x)
-{
-	int a = x;
-	if (canonical() < (x-a)) ++a;
-	return a;
-}
-
-string mpi_serialize(unordered_map<state_type, pair<int, int>>::const_iterator begin, unordered_map<state_type, pair<int, int>>::const_iterator end)
+string mpi_serialize(unordered_map<state_type, int>::const_iterator begin, unordered_map<state_type, int>::const_iterator end)
 {
 	ostringstream oss;
 
 	while (begin != end) {
 		const state_type& state = begin->first;
-		const pair<int, int>& psip = begin->second;
+		int psip = begin->second;
 
-		oss << state.to_string() << ' ' << psip.first << ' ' << psip.second << ' ';
+		oss << state.to_string() << ' ' << psip << ' ';
 
 		begin++;
 	}
 	return oss.str();
 }
 
-void mpi_unserialize(string str, unordered_map<state_type, pair<int, int>>& map)
+void mpi_unserialize(string str, unordered_map<state_type, int>& map)
 {
 	istringstream iss(str);
 	while (true) {
 		string state_str;
-		int first, second;
+		int psip;
 
-		iss >> state_str >> first >> second;
+		iss >> state_str >> psip;
 		if (iss.eof()) break;
 
-		pair<int, int> &psip = map[state_type(state_str)];
-		psip.first  += first;
-		psip.second += second;
+		map[state_type(state_str)] += psip;
 	}
 }
 
 constexpr int tag_length = 0;
 constexpr int tag_data = 1;
+constexpr int tag_energyshift = 2;
 
-void mpi_recv_walkers(int source, unordered_map<state_type, pair<int, int>>& map)
+void mpi_recv_walkers(int source, unordered_map<state_type, int>& map)
 {
 	int len;
 	MPI_Recv(&len, 1, MPI_INT, source, tag_length, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -104,24 +125,15 @@ void mpi_recv_walkers(int source, unordered_map<state_type, pair<int, int>>& map
 	mpi_unserialize(string(data, len), map);
 }
 
-void mpi_send_walkers(int dest, unordered_map<state_type, pair<int, int>>::const_iterator begin, unordered_map<state_type, pair<int, int>>::const_iterator end)
+void mpi_send_walkers(int dest, unordered_map<state_type, int>::const_iterator begin, unordered_map<state_type, int>::const_iterator end)
 {
 	string serial_str = mpi_serialize(begin, end);
 	int len = serial_str.size();
-	int s1, s2;
-	MPI_Pack_size(1,   MPI_INT,  MPI_COMM_WORLD, &s1);
-	MPI_Pack_size(len, MPI_BYTE, MPI_COMM_WORLD, &s2);
-	int size = 2 * MPI_BSEND_OVERHEAD + s1 + s2;
-	cout << size/1024.0/1024.0 << " Mb data" << endl;
-	//void *buffer = malloc(size);
-	//MPI_Buffer_attach(buffer, size);
 	MPI_Send(&len, 1, MPI_INT, dest, tag_length, MPI_COMM_WORLD);
 	MPI_Send((void *)serial_str.data(), len, MPI_BYTE, dest, tag_data, MPI_COMM_WORLD);
-	//MPI_Buffer_detach(&buffer, &size);
-	//free(buffer);
 }
 
-void mpi_split_send_walkers(int size, unordered_map<state_type, pair<int, int>>& map)
+void mpi_split_send_walkers(int size, unordered_map<state_type, int>& map)
 {
 	int states_per_rank = map.size() / size;
 	int states_rest     = map.size() % size;
@@ -152,16 +164,17 @@ int main(int argc, char* argv[])
 	rc = MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
 	double delta_time = 0.2 / N;
-	double shift = 20.5;
+	double energyshift = 20.5;
+	double damping = 0.1;
 
-	unordered_map<state_type, pair<int, int>> walkers;
+	unordered_map<state_type, int> walkers;
 
 	// Initial population
 	if (mpi_rank == 0) {
 		state_type psi;
 		for (int n = 0; n <= N; ++n) {
 			for (int k = 0; k < N; ++k) psi[k] = (k < n);
-			walkers[psi].first = 5;
+			walkers[psi] = 5;
 		}
 
 		cout << mpi_rank << ": " << walkers.size() << " states initialy created" << endl;
@@ -173,114 +186,99 @@ int main(int argc, char* argv[])
 
 	cout << mpi_rank << ": I have " << walkers.size() << " states" << endl;
 
+	vector<pair<state_type, int>> changes;
+
 	// Main loop
 	for (int iter = 0; iter < 10000; ++iter) {
+#ifdef TIMING
 		auto t1 = high_resolution_clock::now();
+#endif
+		changes.clear();
 
 		// (1) Spawning
-		vector<pair<state_type, pair<int,int>>> spawns_list;
-		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
-			const state_type& statei = i->first;
-			const pair<int,int>& psipi = i->second;
+		for (auto& i : walkers) {
+			const state_type& statei = i.first;
+			const int psipi = i.second;
 			for (int k0 = 0; k0 < N; ++k0) {
 				int k1 = (k0+1)%N;
-				if (statei[k0] == statei[k1]) continue;
+				if (statei[k0] == statei[k1]) continue; // otherwise H = 0
 				state_type statej = statei;
 				statej[k0] = statei[k1];
 				statej[k1] = statei[k0];
 				const double H = 0.5;
 				const double T = -H;
-				pair<int,int> psipj = make_pair(0, 0);
-				if (T > 0.0) {
-					// spawn with same charge
-					const double proba = T * delta_time;
-					if (psipi.first > psipi.second) { // annihilation was done
-						psipj.first  += random_round(proba * psipi.first);
-					} else {
-						psipj.second += random_round(proba * psipi.second);
-					}
-				} else {
-					const double proba = -T * delta_time;
-					if (psipi.first > psipi.second) {
-						psipj.second += random_round(proba * psipi.first);
-					} else {
-						psipj.first  += random_round(proba * psipi.second);
-					}
-				}
-				spawns_list.push_back(make_pair(statej, psipj));
+				changes.push_back(make_pair(statej, binomial_throw(psipi, T * delta_time)));
 			}
 		}
 
 		// (2) Diagonal
-		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
-			pair<int,int>& psip = i->second;
-			const double H = hamiltonian_ii(i->first);
-			const double T = -(H - shift);
-			if (T > 0.0) {
-				// cloning
-				const double proba = T * delta_time;
-				if (psip.first > psip.second) {
-					psip.first  += random_round(proba * psip.first);
-				} else {
-					psip.second += random_round(proba * psip.second);
-				}
-			} else {
-				const double proba = -T * delta_time;
-				if (psip.first > psip.second) {
-					psip.first  = max(0, psip.first  - random_round(proba * psip.first));
-				} else {
-					psip.second = max(0, psip.second - random_round(proba * psip.second));
-				}
-			}
+		for (auto& i : walkers) {
+			const state_type& state = i.first;
+			const int psip = i.second;
+			const double H = hamiltonian_ii(state);
+			const double T = -(H - energyshift);
+			changes.push_back(make_pair(state, binomial_throw(psip, clamp(-1.0, T * delta_time, 1.0))));
 		}
 
-		// Insert spawns
-		for (const pair<state_type, pair<int,int>>& x : spawns_list) {
-			pair<int,int>& psip = walkers[x.first];
-			psip.first  += x.second.first;
-			psip.second += x.second.second;
+		// (3) Annihilation
+		for (const pair<state_type, int>& x : changes) {
+			walkers[x.first] += x.second;
 		}
 
+#ifdef TIMING
 		auto t2 = high_resolution_clock::now();
-		cout << mpi_rank << ": iteration " << (iter+1) << " execution time " << 1000.0*duration_cast<duration<double>>(t2 - t1).count() << " ms" << endl;
+		cout << mpi_rank << "@" << (iter+1) << ": physics " << 1000.0*duration_cast<duration<double>>(t2 - t1).count() << " ms" << endl;
+#endif
 
+		size_t count_total_walkers = 0;
 
 		if (mpi_rank == 0) {
-			// recv walkers
 			for (int r = 1; r < mpi_size; ++r) {
-				cout << mpi_rank << ": wait message from " << r << "..." << flush;
 				mpi_recv_walkers(r, walkers);
-				cout << " received" << endl;
 			}
 
-			// (3) Annihilation
 			for (auto i = walkers.begin(); i != walkers.end(); ) {
-				pair<int,int>& psip = i->second;
-				if (psip.first > psip.second) {
-					psip.first -= psip.second;
-					psip.second = 0;
-					++i;
-				} else if (psip.second > psip.first) {
-					psip.second -= psip.first;
-					psip.first = 0;
-					++i;
-				} else {
+				count_total_walkers += abs(i->second);
+
+				if (i->second == 0) {
 					i = walkers.erase(i);
+				} else {
+					++i;
 				}
 			}
-
-			size_t count_total_walkers = 0;
-			for (auto i = walkers.begin(); i != walkers.end(); ++i) {
-				count_total_walkers += i->second.first + i->second.second;
-			}
-
-			cout << mpi_rank << ": iteration " << (iter+1) << " " << count_total_walkers << " walkers" << endl;
-
-			mpi_split_send_walkers(mpi_size, walkers);
+			cout << mpi_rank << "@" << (iter+1) << ": " << count_total_walkers << " walkers" << endl;
 		} else {
 			mpi_send_walkers(0, walkers.begin(), walkers.end());
+			walkers.clear();
+		}
+
+
+
+		constexpr int A = 10;
+		if (iter > 100 && iter%A == 0) {
+			if (mpi_rank == 0) {
+				static double last_count_total_walkers = count_total_walkers;
+				energyshift -= damping / (A * delta_time) * log(count_total_walkers / last_count_total_walkers);
+				cout << mpi_rank << "@" << (iter+1) << ": energyshift = " << energyshift << endl;
+				last_count_total_walkers = count_total_walkers;
+				for (int r = 1; r < mpi_size; ++r)
+					MPI_Send(&energyshift, 1, MPI_DOUBLE, r, tag_energyshift, MPI_COMM_WORLD);
+				// todo compute the energy
+			} else {
+				MPI_Recv(&energyshift, 1, MPI_DOUBLE, 0, tag_energyshift, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			}
+		}
+
+		if (mpi_rank == 0) {
+			mpi_split_send_walkers(mpi_size, walkers);
+		} else {
 			mpi_recv_walkers(0, walkers);
 		}
+
+#ifdef TIMING
+		auto t3 = high_resolution_clock::now();
+		cout << mpi_rank << "@" << (iter+1) << ": mpi " << 1000.0*duration_cast<duration<double>>(t3 - t2).count() << " ms" << endl;
+#endif
 	}
 
 	MPI_Finalize();
