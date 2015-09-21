@@ -10,6 +10,7 @@
 using namespace std;
 
 #undef TIMING
+#define TIMING
 
 inline std::default_random_engine& global_random_engine()
 {
@@ -49,7 +50,7 @@ T clamp(T a, T x, T b)
 	return x;
 }
 
-#define N 100
+#define N 50
 typedef bitset<N> state_type;
 
 double hamiltonian_ii(const state_type& i)
@@ -130,7 +131,8 @@ void mpi_send_walkers(int dest, unordered_map<state_type, int>::const_iterator b
 	string serial_str = mpi_serialize(begin, end);
 	int len = serial_str.size();
 	MPI_Send(&len, 1, MPI_INT, dest, tag_length, MPI_COMM_WORLD);
-	MPI_Send((void *)serial_str.data(), len, MPI_BYTE, dest, tag_data, MPI_COMM_WORLD);
+	int rc = MPI_Send((void *)serial_str.data(), len, MPI_BYTE, dest, tag_data, MPI_COMM_WORLD);
+	if (rc != MPI_SUCCESS) cerr << "error with MPI_Send" << endl;
 }
 
 void mpi_split_send_walkers(int size, unordered_map<state_type, int>& map)
@@ -163,9 +165,9 @@ int main(int argc, char* argv[])
 	int mpi_rank;
 	rc = MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
-	double delta_time = 0.2 / N;
-	double energyshift = 20.5;
-	double damping = 0.1;
+	double delta_time = 0.002;
+	double energyshift = 15.0;
+	double damping = 0.15;
 
 	unordered_map<state_type, int> walkers;
 
@@ -178,18 +180,19 @@ int main(int argc, char* argv[])
 		}
 
 		cout << mpi_rank << ": " << walkers.size() << " states initialy created" << endl;
-
-		mpi_split_send_walkers(mpi_size, walkers);
-	} else {
-		mpi_recv_walkers(0, walkers);
 	}
-
-	cout << mpi_rank << ": I have " << walkers.size() << " states" << endl;
 
 	vector<pair<state_type, int>> changes;
 
 	// Main loop
 	for (int iter = 0; iter < 10000; ++iter) {
+
+		if (mpi_rank == 0) {
+			mpi_split_send_walkers(mpi_size, walkers);
+		} else {
+			mpi_recv_walkers(0, walkers);
+		}
+
 #ifdef TIMING
 		auto t1 = high_resolution_clock::now();
 #endif
@@ -267,12 +270,6 @@ int main(int argc, char* argv[])
 			} else {
 				MPI_Recv(&energyshift, 1, MPI_DOUBLE, 0, tag_energyshift, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 			}
-		}
-
-		if (mpi_rank == 0) {
-			mpi_split_send_walkers(mpi_size, walkers);
-		} else {
-			mpi_recv_walkers(0, walkers);
 		}
 
 #ifdef TIMING
