@@ -1,16 +1,17 @@
 #include <unordered_map>
-#include <bitset>
+#include <array>
 #include <random>
 #include <limits>
 #include <vector>
 #include <sstream>
 #include <thread>
 #include <iostream>
+#include "fciqmc.hh"
 
 #undef TIMING
 //#define TIMING
 #undef USEMPI
-#define USEMPI
+//#define USEMPI
 
 #ifdef TIMING
 #include <chrono>
@@ -22,78 +23,28 @@
 
 using namespace std;
 
-inline std::default_random_engine& global_random_engine()
-{
-	static std::random_device rdev;
-	static std::default_random_engine eng(rdev());
-	return eng;
-}
+// Hubbard model
+// H = -t \sum_{<i,j>,s} s^dag_i s_j + s^dag_j s_i + U \sum_i nup_i ndown_j
 
-inline double canonical()
-{
-	return std::generate_canonical<double, std::numeric_limits<double>::digits>(global_random_engine());
-}
+#define U 1
+#define t 1
+typedef array<uint8_t, 16> state_type;
+// 0 00b  nothing
+// 1 01b  up
+// 2 10b  down
+// 3 11b  up & down
 
-inline int random_round(double x)
-{
-	int a = floor(x);
-	if (canonical() < (x-a)) ++a;
-	return a;
-}
-
-int binomial_throw(int n, double p)
-{
-	if (n < 0) {
-		n = -n;
-		p = -p;
+struct KeyHasher {
+	size_t operator()(const state_type& state) const
+	{
+		size_t r = 0;
+		for (size_t k = 0; k < min<size_t>(state.size(), 32); ++k) {
+			r = (r << 2);
+			r |= state[k];
+		}
+		return r;
 	}
-	int a = floor(p);
-	binomial_distribution<int> distribution(n, p-a);
-	return n * a + distribution(global_random_engine());
-}
-
-template<class T>
-T clamp(T a, T x, T b)
-{
-	if (x < a) return a;
-	if (x > b) return b;
-	return x;
-}
-
-#define N 50
-typedef bitset<N> state_type;
-
-double hamiltonian_ii(const state_type& i)
-{
-	double E = 0.0;
-	for (int k0 = 0; k0 < N; ++k0) {
-		int k1 = (k0+1)%N;
-		if (i[k0] == i[k1]) E += 0.25;
-		else E -= 0.25;
-	}
-	return E;
-}
-
-double hamiltonian_ij(const state_type& i, const state_type& j)
-{
-	if (i == j) return hamiltonian_ii(i);
-
-	int c0 = 0;
-	int c1 = 0;
-	for (int k = 0; k < N; ++k) if (i[k] != j[k]) {
-		c0 = k;
-		break;
-	}
-	for (int k = c0+1; k < N; ++k) if (i[k] != j[k]) {
-		c1 = k;
-		break;
-	}
-	for (int k = c1+1; k < N; ++k) if (i[k] != j[k]) return 0.0;
-
-	if (c0+1 == c1) return 0.5;
-	if (c0 == 0 && c1 == N-1) return 0.5;
-	return 0.0;
-}
+};
 
 #ifdef USEMPI
 string mpi_serialize(unordered_map<state_type, int>::const_iterator begin, unordered_map<state_type, int>::const_iterator end)
@@ -104,7 +55,8 @@ string mpi_serialize(unordered_map<state_type, int>::const_iterator begin, unord
 		const state_type& state = begin->first;
 		int psip = begin->second;
 
-		oss << state.to_string() << ' ' << psip << ' ';
+		for (size_t k = 0; k < state.size(); ++k) oss << state[k];
+		oss << ' ' << psip << ' ';
 
 		begin++;
 	}
@@ -115,16 +67,19 @@ void mpi_unserialize(string str, unordered_map<state_type, int>& map)
 {
 	istringstream iss(str);
 	while (true) {
-		string state_str;
+		state_type state;
 		int psip;
-
-		iss >> state_str >> psip;
+		char ch;
+		for (size_t k = 0; k < state.size(); ++k) {
+			iss.get(ch);
+			state[k] = ch-'0';
+		}
+		iss >> psip;
 		if (iss.eof()) break;
 
-		map[state_type(state_str)] += psip;
+		map[state] += psip;
 	}
 }
-
 
 constexpr int tag_amount = 0;
 constexpr int tag_length = 1;
@@ -205,20 +160,21 @@ int main(int argc, char* argv[])
 	cout << "Number of thread on this socket " << thr_size << endl;
 	if (thr_size == 0) thr_size = 1;
 
-	double delta_time = 0.002;
-	double energyshift = 15.0;
-	double damping = 0.15;
+	double delta_time = 0.003;
+	double energyshift = 50.0;
+	double damping = 0.10;
 
-	unordered_map<state_type, int> walkers;
-	typedef unordered_map<state_type, int>::iterator type_it;
+	unordered_map<state_type, int, KeyHasher> walkers;
+	typedef unordered_map<state_type, int, KeyHasher>::iterator type_it;
+
+	walkers.reserve(10000);
 
 	// Initial population
 	if (mpi_rank == 0) {
 		state_type psi;
-		for (int n = 0; n <= N; ++n) {
-			for (int k = 0; k < N; ++k) psi[k] = (k < n);
-			walkers[psi] = 5;
-		}
+		for (size_t k = 0; k < psi.size(); ++k) psi[k] = 1 + (k&0x1); // 1212121212121...
+
+		walkers[psi] = 1;
 
 		cout << mpi_rank << ": " << walkers.size() << " states initialy created" << endl;
 	}
@@ -226,7 +182,7 @@ int main(int argc, char* argv[])
 	vector<vector<pair<state_type, int>>> changes(thr_size);
 
 	// Main loop
-	for (int iter = 0; iter < 2000; ++iter) {
+	for (int iter = 0; iter < 100; ++iter) {
 
 #ifdef USEMPI
 		if (mpi_rank == 0) {
@@ -245,52 +201,74 @@ int main(int argc, char* argv[])
 
 		for (auto& x : changes) x.clear();
 
+		cout << "run threades... " << flush;
 		vector<thread> thr_list;
-		type_it it = walkers.begin();
+		type_it begin = walkers.begin();
 		for (int thr_i = 0; thr_i < thr_size; ++thr_i) {
-			type_it it_end = it;
-			advance(it_end, thr_amt);
-			if (thr_i < thr_rst) it_end++;
+			type_it end = begin;
+			advance(end, thr_amt);
+			if (thr_i < thr_rst) end++;
 
-			thr_list.push_back(thread([&, thr_i](type_it begin, type_it end) {
+			auto lambda = [&, thr_i, begin, end]() {
 				for (auto i = begin; i != end; ++i) {
 					const state_type& statei = i->first;
 					const int psipi = i->second;
 
 					// (1) Spawning
-					for (int k0 = 0; k0 < N; ++k0) {
-						const int k1 = (k0+1)%N;
-						if (statei[k0] == statei[k1]) continue; // otherwise H = 0
-						state_type statej = statei;
-						statej[k0] = statei[k1];
-						statej[k1] = statei[k0];
-						const double H = 0.5;
-						const double T = -H;
-						changes[thr_i].push_back(make_pair(statej, binomial_throw(psipi, T * delta_time)));
+					for (size_t k0 = 0; k0 < statei.size(); ++k0) {
+						const size_t k1 = (k0+1)%statei.size();
+						// 0 00b  nothing
+						// 1 01b  up
+						// 2 10b  down
+						// 3 11b  up & down
+						if ((statei[k0] & 0x1) ^ (statei[k1] & 0x1)) {
+							state_type statej = statei;
+							statej[k0] = statej[k0] ^ 0x1;
+							statej[k1] = statej[k1] ^ 0x1;
+							const double H = -t;
+							const double T = -H;
+							changes[thr_i].push_back(make_pair(statej, binomial_throw(psipi, T * delta_time)));
+						}
+						if ((statei[k0] & 0x2) ^ (statei[k1] & 0x2)) {
+							state_type statej = statei;
+							statej[k0] = statej[k0] ^ 0x2;
+							statej[k1] = statej[k1] ^ 0x2;
+							const double H = -t;
+							const double T = -H;
+							changes[thr_i].push_back(make_pair(statej, binomial_throw(psipi, T * delta_time)));
+						}
 					}
 
 
 					// (2) Diagonal
-					const double H = hamiltonian_ii(statei);
+					double H = 0.0;
+					for (size_t k = 0; k < statei.size(); ++k) {
+						if (statei[k] == 3) H += U;
+					}
 					const double T = -(H - energyshift);
 					changes[thr_i].push_back(make_pair(statei, binomial_throw(psipi, clamp(-1.0, T * delta_time, 1.0))));
 				}
-			}, it, it_end));
-			it = it_end;
+			};
+			begin = end;
+
+			//thr_list.push_back(thread(lambda));
+			lambda();
 		}
 
+		cout << "wait... " << flush;
 		for (auto &x : thr_list) x.join();
+		cout << "done" << endl;
 
 		// (3) Annihilation
-		for (auto &xx : changes) {
-			for (auto &x : xx) {
+		for (const auto &xx : changes) {
+			for (const auto &x : xx) {
 				walkers[x.first] += x.second;
 			}
 		}
 
 #ifdef TIMING
 		auto t2 = high_resolution_clock::now();
-		cout << mpi_rank << "@" << (iter+1) << ": physics " << 1000.0*duration_cast<duration<double>>(t2 - t1).count() << " ms" << endl;
+		cout << mpi_rank << "@" << iter << ": physics " << 1000.0*duration_cast<duration<double>>(t2 - t1).count() << " ms" << endl;
 #endif
 
 		size_t count_total_walkers = 0;
@@ -302,8 +280,12 @@ int main(int argc, char* argv[])
 			}
 #endif
 
+			int min_per_state = 0;
+			int max_per_state = 0;
 			for (auto i = walkers.begin(); i != walkers.end(); ) {
 				count_total_walkers += abs(i->second);
+				min_per_state = min(min_per_state, i->second);
+				max_per_state = max(max_per_state, i->second);
 
 				if (i->second == 0) {
 					i = walkers.erase(i);
@@ -311,7 +293,8 @@ int main(int argc, char* argv[])
 					++i;
 				}
 			}
-			cout << mpi_rank << "@" << (iter+1) << ": " << count_total_walkers << " walkers" << endl;
+			cout << mpi_rank << "@" << iter << ": " << count_total_walkers << " walkers in " << walkers.size() << " states. pips from " <<
+							min_per_state << " to " << max_per_state << endl;
 		} else {
 #ifdef USEMPI
 			mpi_send_walkers(0, walkers.begin(), walkers.size());
@@ -321,12 +304,12 @@ int main(int argc, char* argv[])
 
 
 
-		constexpr int A = 10;
-		if (iter > 100 && iter%A == 0) {
+		constexpr int A = 5;
+		if (iter > 0 && iter%A == 0) {
 			if (mpi_rank == 0) {
 				static double last_count_total_walkers = count_total_walkers;
 				energyshift -= damping / (A * delta_time) * log(count_total_walkers / last_count_total_walkers);
-				cout << mpi_rank << "@" << (iter+1) << ": energyshift = " << energyshift << endl;
+				cout << mpi_rank << "@" << iter << ": energyshift = " << energyshift << endl;
 				last_count_total_walkers = count_total_walkers;
 #ifdef USEMPI
 				for (int r = 1; r < mpi_size; ++r)
@@ -340,7 +323,7 @@ int main(int argc, char* argv[])
 
 #ifdef TIMING
 		auto t3 = high_resolution_clock::now();
-		cout << mpi_rank << "@" << (iter+1) << ": mpi " << 1000.0*duration_cast<duration<double>>(t3 - t2).count() << " ms" << endl;
+		cout << mpi_rank << "@" << iter << ": mpi " << 1000.0*duration_cast<duration<double>>(t3 - t2).count() << " ms" << endl;
 #endif
 	}
 
