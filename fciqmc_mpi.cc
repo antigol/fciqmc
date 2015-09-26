@@ -28,7 +28,10 @@ using namespace std;
 
 #define U 1
 #define t 1
-typedef array<uint8_t, 16> state_type;
+#define n (16*2)
+#define GETSPIN(s, k) (s[(k>>4)] >> (k&0xf << 1))
+#define SWAPSPIN(s, k, v) s[(k>>4)] ^= (v << (k&0xf << 1))
+typedef array<uint32_t, n/16> state_type;
 // 0 00b  nothing
 // 1 01b  up
 // 2 10b  down
@@ -37,12 +40,8 @@ typedef array<uint8_t, 16> state_type;
 struct KeyHasher {
 	size_t operator()(const state_type& state) const
 	{
-		size_t r = 0;
-		for (size_t k = 0; k < min<size_t>(state.size(), 32); ++k) {
-			r = (r << 2);
-			r |= state[k];
-		}
-		return r;
+		if (state.size() > 1) return state[0] | ((size_t)state[1] << 32);
+		else return state[0];
 	}
 };
 
@@ -160,7 +159,7 @@ int main(int argc, char* argv[])
 	cout << "Number of thread on this socket " << thr_size << endl;
 	if (thr_size == 0) thr_size = 1;
 
-	double delta_time = 0.003;
+	double delta_time = 0.002;
 	double energyshift = 50.0;
 	double damping = 0.10;
 
@@ -172,8 +171,9 @@ int main(int argc, char* argv[])
 	// Initial population
 	if (mpi_rank == 0) {
 		state_type psi;
-		for (size_t k = 0; k < psi.size(); ++k) psi[k] = 1 + (k&0x1); // 1212121212121...
-
+		for (size_t k = 0; k < psi.size(); ++k) {
+			psi[k] = 0x99999999; // up, down, up, down...
+		}
 		walkers[psi] = 1;
 
 		cout << mpi_rank << ": " << walkers.size() << " states initialy created" << endl;
@@ -182,7 +182,7 @@ int main(int argc, char* argv[])
 	vector<vector<pair<state_type, int>>> changes(thr_size);
 
 	// Main loop
-	for (int iter = 0; iter < 100; ++iter) {
+	for (int iter = 0; iter < 1000; ++iter) {
 
 #ifdef USEMPI
 		if (mpi_rank == 0) {
@@ -215,24 +215,24 @@ int main(int argc, char* argv[])
 					const int psipi = i->second;
 
 					// (1) Spawning
-					for (size_t k0 = 0; k0 < statei.size(); ++k0) {
-						const size_t k1 = (k0+1)%statei.size();
+					for (size_t k0 = 0; k0 < n; ++k0) {
+						const size_t k1 = (k0+1)%n;
 						// 0 00b  nothing
 						// 1 01b  up
 						// 2 10b  down
 						// 3 11b  up & down
-						if ((statei[k0] & 0x1) ^ (statei[k1] & 0x1)) {
+						if ((GETSPIN(statei, k0) & 0x1) ^ (GETSPIN(statei,k1) & 0x1)) {
 							state_type statej = statei;
-							statej[k0] = statej[k0] ^ 0x1;
-							statej[k1] = statej[k1] ^ 0x1;
+							SWAPSPIN(statej, k0, 0x1);
+							SWAPSPIN(statej, k1, 0x1);
 							const double H = -t;
 							const double T = -H;
 							changes[thr_i].push_back(make_pair(statej, binomial_throw(psipi, T * delta_time)));
 						}
-						if ((statei[k0] & 0x2) ^ (statei[k1] & 0x2)) {
+						if ((GETSPIN(statei, k0) & 0x2) ^ (GETSPIN(statei,k1) & 0x2)) {
 							state_type statej = statei;
-							statej[k0] = statej[k0] ^ 0x2;
-							statej[k1] = statej[k1] ^ 0x2;
+							SWAPSPIN(statej, k0, 0x2);
+							SWAPSPIN(statej, k1, 0x2);
 							const double H = -t;
 							const double T = -H;
 							changes[thr_i].push_back(make_pair(statej, binomial_throw(psipi, T * delta_time)));
@@ -242,8 +242,8 @@ int main(int argc, char* argv[])
 
 					// (2) Diagonal
 					double H = 0.0;
-					for (size_t k = 0; k < statei.size(); ++k) {
-						if (statei[k] == 3) H += U;
+					for (size_t k = 0; k < n; ++k) {
+						if ((GETSPIN(statei, k)&0x3) == 3) H += U;
 					}
 					const double T = -(H - energyshift);
 					changes[thr_i].push_back(make_pair(statei, binomial_throw(psipi, clamp(-1.0, T * delta_time, 1.0))));
@@ -305,7 +305,7 @@ int main(int argc, char* argv[])
 
 
 		constexpr int A = 5;
-		if (iter > 0 && iter%A == 0) {
+		if (iter > 50 && iter%A == 0) {
 			if (mpi_rank == 0) {
 				static double last_count_total_walkers = count_total_walkers;
 				energyshift -= damping / (A * delta_time) * log(count_total_walkers / last_count_total_walkers);
