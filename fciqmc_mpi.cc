@@ -28,10 +28,11 @@ using namespace std;
 
 #define U 1
 #define t 1
-#define n (16*2)
-#define GETSPIN(s, k) (s[(k>>4)] >> (k&0xf << 1))
-#define SWAPSPIN(s, k, v) s[(k>>4)] ^= (v << (k&0xf << 1))
-typedef array<uint32_t, n/16> state_type;
+#define n 2
+#define sn 16
+#define GETSPIN(s, k)    (s[(k>>4)] >>       (k&0x0f << 1))
+#define SWAPSPIN(s, k, v) s[(k>>4)] ^= (v << (k&0x0f << 1))
+typedef array<uint32_t, n> state_type;
 // 0 00b  nothing
 // 1 01b  up
 // 2 10b  down
@@ -40,8 +41,7 @@ typedef array<uint32_t, n/16> state_type;
 struct KeyHasher {
 	size_t operator()(const state_type& state) const
 	{
-		if (state.size() > 1) return state[0] | ((size_t)state[1] << 32);
-		else return state[0];
+		return ((size_t)state[1] << 32) | state[0];
 	}
 };
 
@@ -215,8 +215,8 @@ int main(int argc, char* argv[])
 					const int psipi = i->second;
 
 					// (1) Spawning
-					for (size_t k0 = 0; k0 < n; ++k0) {
-						const size_t k1 = (k0+1)%n;
+					for (size_t k0 = 0; k0 < n*sn; ++k0) {
+						const size_t k1 = (k0+1)%(n*sn);
 						// 0 00b  nothing
 						// 1 01b  up
 						// 2 10b  down
@@ -242,8 +242,8 @@ int main(int argc, char* argv[])
 
 					// (2) Diagonal
 					double H = 0.0;
-					for (size_t k = 0; k < n; ++k) {
-						if ((GETSPIN(statei, k)&0x3) == 3) H += U;
+					for (size_t k = 0; k < n*sn; ++k) {
+						if ((GETSPIN(statei, k)&0x3) == 0x3) H += U;
 					}
 					const double T = -(H - energyshift);
 					changes[thr_i].push_back(make_pair(statei, binomial_throw(psipi, clamp(-1.0, T * delta_time, 1.0))));
