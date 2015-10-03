@@ -3,6 +3,9 @@
 #include <unordered_map>
 #include <fstream>
 #include <iostream>
+#include <csignal>
+#include <chrono>
+
 #include "fciqmc.hh"
 
 using namespace std;
@@ -10,7 +13,7 @@ using namespace std;
 // H = -t \sum_{<i,j>,s} s^dag_i s_j + s^dag_j s_i + U \sum_i nup_i ndown_j
 constexpr double t = 1.0;
 constexpr double U = 1.0;
-constexpr size_t n = 10;
+constexpr size_t n = 16;
 typedef array<uint8_t, n> state_type;
 
 struct KeyHasher {
@@ -25,24 +28,36 @@ struct KeyHasher {
 	}
 };
 
+sig_atomic_t stop = 0;
+void int_handler(int)
+{
+	stop = 1;
+}
+
 int main()
 {
+	signal(SIGINT, int_handler);
 	ofstream ofs("data");
 
-	unordered_map<state_type, int, KeyHasher> walkers;
-	walkers.reserve(1024 * 16);
+	double time1, time2;
 
-	state_type start = {1,0, 0,1, 1,0, 0,1, 1,0};
+	unordered_map<state_type, int, KeyHasher> walkers;
+
+	state_type start;
+	for (size_t k = 0; k < n; ++k) {
+		start[k] = 1;
+	}
 	walkers[start] = 1;
 
-	double energyshift = 10.0;
+	double energyshift = 20.0;
 	constexpr double dt = 0.01;
 
 	uniform_int_distribution<> dis(0, n-1);
 	vector<pair<state_type, int>> changes;
 	changes.reserve(128);
 
-	for (size_t iter = 0; iter < 5000; ++iter) {
+	for (size_t iter = 0; !stop; ++iter) {
+		auto t1 = chrono::high_resolution_clock::now();
 		changes.clear();
 
 		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
@@ -74,6 +89,7 @@ int main()
 			// if E < 0 => clone
 			changes.emplace_back(st_i, binomial_throw(w_i, clamp(-1.0, -E * dt, 1.0)));
 		}
+		auto t2 = chrono::high_resolution_clock::now();
 
 		for (auto& x : changes) walkers[x.first] += x.second;
 
@@ -87,20 +103,26 @@ int main()
 				++i;
 			}
 		}
-		cout << "@" << iter << ": " << count_total_walkers << "/" << walkers.size() << endl;
 
 		constexpr int A = 5;
 		if (iter > 50 && iter%A == 0) {
 			static double last_count_total_walkers = count_total_walkers;
-			constexpr double damping = 0.1;
+			constexpr double damping = 0.2;
+
 			energyshift -= damping / (A * dt) * log(count_total_walkers / last_count_total_walkers);
-			cout << "@" << iter << ": energyshift = " << energyshift << endl;
 			last_count_total_walkers = count_total_walkers;
+
+			cout << "@" << iter << ": " << count_total_walkers << "/" << walkers.size() << " es=" << energyshift << endl;
 
 			ofs << iter <<' '<< energyshift <<' '<< count_total_walkers <<' '<< walkers.size() << endl;
 		}
+		auto t3 = chrono::high_resolution_clock::now();
+
+		time1 = (time1 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t2 - t1).count()) / (iter + 1);
+		time2 = (time2 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t3 - t2).count()) / (iter + 1);
 	}
 
-						 ofs.close();
+	cout << "chrono : " << time1 <<' '<< time2 << endl;
+	ofs.close();
 	return 0;
 }
