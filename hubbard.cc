@@ -10,9 +10,10 @@
 
 using namespace std;
 
-// H = -t \sum_{<i,j>,s} s^dag_i s_j + s^dag_j s_i + U \sum_i nup_i ndown_j
+// H = -t \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1) - mu \sum_i n_i
 constexpr double t = 1.0;
-constexpr double U = 1.0;
+constexpr double U = 0.8;
+constexpr double mu = 0.6;
 constexpr size_t n = 16;
 typedef array<uint8_t, n> state_type;
 
@@ -39,7 +40,7 @@ int main()
 	signal(SIGINT, int_handler);
 	ofstream ofs("data");
 
-	double time1, time2;
+	double time1 = 0.0, time2 = 0.0, time3 = 0.0, time4 = 0.0;
 
 	unordered_map<state_type, int, KeyHasher> walkers;
 
@@ -49,49 +50,61 @@ int main()
 	}
 	walkers[start] = 1;
 
-	double energyshift = 20.0;
+	double energyshift = 0.0;
 	constexpr double dt = 0.01;
 
-	uniform_int_distribution<> dis(0, n-1);
+	uniform_int_distribution<> dist_kl(0, 2*n-1);
 	vector<pair<state_type, int>> changes;
-	changes.reserve(128);
 
 	for (size_t iter = 0; !stop; ++iter) {
 		auto t1 = chrono::high_resolution_clock::now();
 		changes.clear();
 
+		// H = -t \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1) - mu \sum_i n_i
 		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
-			const state_type& st_i = i->first;
+			const state_type& ste_i = i->first;
 			int w_i = i->second;
+			int s_i = signbit(w_i) ? -1 : 1;
+
+			binomial_distribution<> d(abs(w_i), t * dt);
+			int c_i = d(global_random_engine());
 
 			// spawn
-			for (int s = abs(w_i); s > 0; --s) {
-				size_t k0 = dis(global_random_engine());
-				size_t k1 = (k0 + 2) % n;
-				if (st_i[k0] > 0) {
-					state_type st_j(st_i);
-					st_j[k0]--;
-					st_j[k1]++;
+			while (c_i--) {
+				size_t kl = dist_kl(global_random_engine());
+				size_t k = kl % n;
+				if (ste_i[k] > 0) {
+					size_t l = k + (kl>=n ? 1 : -1);
+					state_type ste_j(ste_i);
+					ste_j[k]--;
+					ste_j[l]++;
 					// E = -t
-					if (canonical() < t * dt) {
-						// qj = -sign(E) qi => qj = qi
-						changes.emplace_back(st_j, w_i>0?1:-1);
-					}
+					// qj = -sign(E) qi => qj = qi
+					changes.emplace_back(ste_j, s_i);
 				}
 			}
+		}
+
+		auto t2 = chrono::high_resolution_clock::now();
+
+		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
+			const state_type& ste_i = i->first;
 
 			// diag
 			double E = 0.0;
-			for (size_t k = 0; k < n; k += 2) {
-				E += U * st_i[k] * st_i[k+1];
+			for (size_t k = 0; k < n; ++k) {
+				E += ste_i[k] * (U*(ste_i[k] - 1)/2.0 - mu);
 			}
 			E -= energyshift;
 			// if E < 0 => clone
-			changes.emplace_back(st_i, binomial_throw(w_i, clamp(-1.0, -E * dt, 1.0)));
+			i->second += binomial_throw(i->second, clamp(-1.0, -E * dt, 1.0));
 		}
-		auto t2 = chrono::high_resolution_clock::now();
+		auto t3 = chrono::high_resolution_clock::now();
+
 
 		for (auto& x : changes) walkers[x.first] += x.second;
+
+		auto t4 = chrono::high_resolution_clock::now();
 
 		// annihilation
 		double count_total_walkers = 0.0;
@@ -104,10 +117,11 @@ int main()
 			}
 		}
 
+
 		constexpr int A = 5;
 		if (iter > 50 && iter%A == 0) {
 			static double last_count_total_walkers = count_total_walkers;
-			constexpr double damping = 0.2;
+			constexpr double damping = 0.05;
 
 			energyshift -= damping / (A * dt) * log(count_total_walkers / last_count_total_walkers);
 			last_count_total_walkers = count_total_walkers;
@@ -116,13 +130,16 @@ int main()
 
 			ofs << iter <<' '<< energyshift <<' '<< count_total_walkers <<' '<< walkers.size() << endl;
 		}
-		auto t3 = chrono::high_resolution_clock::now();
+		auto t5 = chrono::high_resolution_clock::now();
+
 
 		time1 = (time1 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t2 - t1).count()) / (iter + 1);
 		time2 = (time2 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t3 - t2).count()) / (iter + 1);
+		time3 = (time3 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t4 - t3).count()) / (iter + 1);
+		time4 = (time4 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t5 - t4).count()) / (iter + 1);
 	}
 
-	cout << "chrono : " << time1 <<' '<< time2 << endl;
+	cout << "chrono : spw"<<time1 <<" dg"<<time2<<" cgs"<<time3<<" ann"<<time4<< " (ms in average)" << endl;
 	ofs.close();
 	return 0;
 }
