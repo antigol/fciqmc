@@ -35,7 +35,7 @@ int binomial_throw(int n, double p)
 }
 
 template<class T>
-T clamp(T a, T x, T b)
+inline T clamp(T a, T x, T b)
 {
 	if (x < a) return a;
 	if (x > b) return b;

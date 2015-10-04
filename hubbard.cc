@@ -1,6 +1,5 @@
 #include <vector>
 #include <array>
-//#include <unordered_map>
 #include <map>
 #include <fstream>
 #include <iostream>
@@ -15,20 +14,9 @@ using namespace std;
 constexpr double t = 1.0;
 constexpr double U = 0.8;
 constexpr double mu = 0.6;
-constexpr size_t n = 10*10;
+constexpr size_t n = 16*16;
 typedef array<uint8_t, n> state_type;
 
-//struct KeyHasher {
-//	size_t operator()(const state_type& state) const
-//	{
-//		constexpr size_t n64 = 64 < n ? 64 : n;
-//		size_t r = 0;
-//		for (size_t k = 0; k < n64; ++k) {
-//			r ^= (state[k] << k);
-//		}
-//		return r;
-//	}
-//};
 struct KeyCompare {
 	bool operator()(const state_type& lhs, const state_type& rhs) const
 	{
@@ -57,8 +45,8 @@ int main()
 	vector<size_t> ngh[n];
 	for (size_t k = 0; k < n; ++k) {
 		//nhg[k] = {(k-1+n)%n, (k+1)%n};
-		size_t w = 10;
-		size_t h = 10;
+		size_t w = 16;
+		size_t h = 16;
 		size_t x = k % w;
 		size_t y = k / w;
 		ngh[k] = {
@@ -69,16 +57,15 @@ int main()
 		};
 	}
 
-	//unordered_map<state_type, int, KeyHasher> walkers;
 	map<state_type, int, KeyCompare> walkers;
 
 	state_type start;
 	for (size_t k = 0; k < n; ++k) {
-		start[k] = 1;
+		start[k] = 2;
 	}
 	walkers[start] = 1;
 
-	double energyshift = -25.0;
+	double energyshift = -85.0;
 	constexpr double dt = 0.005;
 
 	uniform_int_distribution<> dist_n(0, n-1);
@@ -131,8 +118,7 @@ int main()
 		}
 		auto t3 = chrono::high_resolution_clock::now();
 
-
-		for (auto& x : changes) walkers[x.first] += x.second;
+		for (size_t k = 0; k < changes.size(); ++k) walkers[changes[k].first] += changes[k].second;
 
 		auto t4 = chrono::high_resolution_clock::now();
 
