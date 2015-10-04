@@ -1,6 +1,7 @@
 #include <vector>
 #include <array>
 #include <unordered_map>
+#include <map>
 #include <fstream>
 #include <iostream>
 #include <csignal>
@@ -28,6 +29,17 @@ struct KeyHasher {
 		return r;
 	}
 };
+struct KeyCompare {
+	bool operator()(const state_type& lhs, const state_type& rhs) const
+	{
+		for (size_t k = 0; k < n; ++k) {
+			if (lhs[k] < rhs[k]) return true;
+			if (lhs[k] > rhs[k]) return false;
+		}
+		return false;
+	}
+};
+
 
 sig_atomic_t stop = 0;
 void int_handler(int)
@@ -47,7 +59,8 @@ int main()
 		nhg[k] = {(k-1+n)%n, (k+1)%n};
 	}
 
-	unordered_map<state_type, int, KeyHasher> walkers;
+	//unordered_map<state_type, int, KeyHasher> walkers;
+	map<state_type, int, KeyCompare> walkers;
 
 	state_type start;
 	for (size_t k = 0; k < n; ++k) {
