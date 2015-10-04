@@ -1,6 +1,6 @@
 #include <vector>
 #include <array>
-#include <unordered_map>
+//#include <unordered_map>
 #include <map>
 #include <fstream>
 #include <iostream>
@@ -18,17 +18,17 @@ constexpr double mu = 0.6;
 constexpr size_t n = 10*10;
 typedef array<uint8_t, n> state_type;
 
-struct KeyHasher {
-	size_t operator()(const state_type& state) const
-	{
-		constexpr size_t n64 = 64 < n ? 64 : n;
-		size_t r = 0;
-		for (size_t k = 0; k < n64; ++k) {
-			r ^= (state[k] << k);
-		}
-		return r;
-	}
-};
+//struct KeyHasher {
+//	size_t operator()(const state_type& state) const
+//	{
+//		constexpr size_t n64 = 64 < n ? 64 : n;
+//		size_t r = 0;
+//		for (size_t k = 0; k < n64; ++k) {
+//			r ^= (state[k] << k);
+//		}
+//		return r;
+//	}
+//};
 struct KeyCompare {
 	bool operator()(const state_type& lhs, const state_type& rhs) const
 	{
@@ -79,7 +79,7 @@ int main()
 	walkers[start] = 1;
 
 	double energyshift = -25.0;
-	constexpr double dt = 0.003;
+	constexpr double dt = 0.005;
 
 	uniform_int_distribution<> dist_n(0, n-1);
 	vector<pair<state_type, int>> changes;
@@ -169,7 +169,8 @@ int main()
 		time4 = (time4 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t5 - t4).count()) / (iter + 1);
 	}
 
-	cout << "chrono : spw"<<time1 <<" dg"<<time2<<" cgs"<<time3<<" ann"<<time4<< " (ms in average)" << endl;
+	cout << "chrono : spw"<<round(time1)<<" +dg"<<round(time2)<<" +cgs"<<round(time3)<<" +ann"<<round(time4)
+			 <<"= "<<round(time1+time2+time3+time4)<< " (ms in average)" << endl;
 	ofs.close();
 	return 0;
 }
