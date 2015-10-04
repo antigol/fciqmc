@@ -16,3 +16,5 @@ QMAKE_CXXFLAGS_RELEASE -= -O2
 QMAKE_CXXFLAGS_RELEASE *= -Ofast
 QMAKE_CXXFLAGS_RELEASE *= -march=native
 QMAKE_CXXFLAGS_RELEASE *= -flto -fwhole-program
+
+QMAKE_LFLAGS_RELEASE *= -flto -fwhole-program

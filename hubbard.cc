@@ -42,6 +42,11 @@ int main()
 
 	double time1 = 0.0, time2 = 0.0, time3 = 0.0, time4 = 0.0;
 
+	vector<size_t> nhg[n];
+	for (size_t k = 0; k < n; ++k) {
+		nhg[k] = {(k-1+n)%n, (k+1)%n};
+	}
+
 	unordered_map<state_type, int, KeyHasher> walkers;
 
 	state_type start;
@@ -51,9 +56,9 @@ int main()
 	walkers[start] = 1;
 
 	double energyshift = 0.0;
-	constexpr double dt = 0.01;
+	constexpr double dt = 0.005;
 
-	uniform_int_distribution<> dist_kl(0, 2*n-1);
+	uniform_int_distribution<> dist_n(0, n-1);
 	vector<pair<state_type, int>> changes;
 
 	for (size_t iter = 0; !stop; ++iter) {
@@ -71,12 +76,13 @@ int main()
 
 			// spawn
 			while (c_i--) {
-				size_t kl = dist_kl(global_random_engine());
-				size_t k = kl % n;
+				size_t k = dist_n(global_random_engine());
 				if (ste_i[k] > 0) {
-					size_t l = k + (kl>=n ? 1 : -1);
 					state_type ste_j(ste_i);
 					ste_j[k]--;
+
+					uniform_int_distribution<> dist_l(0, nhg[k].size()-1);
+					size_t l = nhg[k][dist_l(global_random_engine())];
 					ste_j[l]++;
 					// E = -t
 					// qj = -sign(E) qi => qj = qi
@@ -119,15 +125,15 @@ int main()
 
 
 		constexpr int A = 5;
-		if (iter > 50 && iter%A == 0) {
+		if (iter > 200 && iter%A == 0) {
 			static double last_count_total_walkers = count_total_walkers;
 			constexpr double damping = 0.05;
 
 			energyshift -= damping / (A * dt) * log(count_total_walkers / last_count_total_walkers);
 			last_count_total_walkers = count_total_walkers;
-
+		}
+		if (iter % A == 0) {
 			cout << "@" << iter << ": " << count_total_walkers << "/" << walkers.size() << " es=" << energyshift << endl;
-
 			ofs << iter <<' '<< energyshift <<' '<< count_total_walkers <<' '<< walkers.size() << endl;
 		}
 		auto t5 = chrono::high_resolution_clock::now();
