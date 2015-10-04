@@ -15,16 +15,16 @@ using namespace std;
 constexpr double t = 1.0;
 constexpr double U = 0.8;
 constexpr double mu = 0.6;
-constexpr size_t n = 16;
+constexpr size_t n = 10*10;
 typedef array<uint8_t, n> state_type;
 
 struct KeyHasher {
 	size_t operator()(const state_type& state) const
 	{
+		constexpr size_t n64 = 64 < n ? 64 : n;
 		size_t r = 0;
-		for (size_t k = 0; k < n; ++k) {
-			r = (r << 4);
-			r ^= state[k];
+		for (size_t k = 0; k < n64; ++k) {
+			r ^= (state[k] << k);
 		}
 		return r;
 	}
@@ -54,9 +54,19 @@ int main()
 
 	double time1 = 0.0, time2 = 0.0, time3 = 0.0, time4 = 0.0;
 
-	vector<size_t> nhg[n];
+	vector<size_t> ngh[n];
 	for (size_t k = 0; k < n; ++k) {
-		nhg[k] = {(k-1+n)%n, (k+1)%n};
+		//nhg[k] = {(k-1+n)%n, (k+1)%n};
+		size_t w = 10;
+		size_t h = 10;
+		size_t x = k % w;
+		size_t y = k / w;
+		ngh[k] = {
+			w*y           + ((x+1)%w),
+			w*y           + ((x-1+w)%w),
+			w*((y+1)%h)   + x,
+			w*((y-1+h)%h) + x
+		};
 	}
 
 	//unordered_map<state_type, int, KeyHasher> walkers;
@@ -68,8 +78,8 @@ int main()
 	}
 	walkers[start] = 1;
 
-	double energyshift = 0.0;
-	constexpr double dt = 0.005;
+	double energyshift = -25.0;
+	constexpr double dt = 0.003;
 
 	uniform_int_distribution<> dist_n(0, n-1);
 	vector<pair<state_type, int>> changes;
@@ -88,18 +98,19 @@ int main()
 			int c_i = d(global_random_engine());
 
 			// spawn
-			while (c_i--) {
+			while (c_i) {
 				size_t k = dist_n(global_random_engine());
 				if (ste_i[k] > 0) {
 					state_type ste_j(ste_i);
 					ste_j[k]--;
 
-					uniform_int_distribution<> dist_l(0, nhg[k].size()-1);
-					size_t l = nhg[k][dist_l(global_random_engine())];
+					uniform_int_distribution<> d(0, ngh[k].size()-1);
+					size_t l = ngh[k][d(global_random_engine())];
 					ste_j[l]++;
 					// E = -t
 					// qj = -sign(E) qi => qj = qi
 					changes.emplace_back(ste_j, s_i);
+					c_i--;
 				}
 			}
 		}
@@ -138,7 +149,7 @@ int main()
 
 
 		constexpr int A = 5;
-		if (iter > 200 && iter%A == 0) {
+		if (iter > 20 && iter%A == 0) {
 			static double last_count_total_walkers = count_total_walkers;
 			constexpr double damping = 0.05;
 
