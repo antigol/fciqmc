@@ -11,7 +11,7 @@
 using namespace std;
 
 // H = -t \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1) - mu \sum_i n_i
-constexpr double t = 1.0;
+constexpr double t = 0.1;
 constexpr double U = 0.8;
 constexpr double mu = 0.6;
 constexpr size_t n = 16*16;
