@@ -10,11 +10,10 @@
 
 using namespace std;
 
-// H = -t \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1) - mu \sum_i n_i
-constexpr double t = 0.1;
-constexpr double U = 0.8;
-constexpr double mu = 0.6;
-constexpr size_t n = 16*16;
+// H = -t \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
+constexpr double t = 1.0;
+constexpr double U = 10.0;
+constexpr size_t n = 8;
 typedef array<uint8_t, n> state_type;
 
 struct KeyCompare {
@@ -44,8 +43,7 @@ int main()
 
 	vector<size_t> ngh[n];
 	for (size_t k = 0; k < n; ++k) {
-		//nhg[k] = {(k-1+n)%n, (k+1)%n};
-		size_t w = 16;
+		/*size_t w = 16;
 		size_t h = 16;
 		size_t x = k % w;
 		size_t y = k / w;
@@ -54,71 +52,85 @@ int main()
 			w*y           + ((x-1+w)%w),
 			w*((y+1)%h)   + x,
 			w*((y-1+h)%h) + x
-		};
+		};*/
+		//ngh[k] = {(k-1+n)%n, (k+1)%n};
+		if (k == 0) ngh[k] = {k+1};
+		else if (k == n-1) ngh[k] = {k-1};
+		else ngh[k] = {k+1, k-1};
 	}
 
 	map<state_type, int, KeyCompare> walkers;
 
 	state_type start;
 	for (size_t k = 0; k < n; ++k) {
-		start[k] = 2;
+		start[k] = 1;
 	}
 	walkers[start] = 1;
 
-	double energyshift = -85.0;
-	constexpr double dt = 0.005;
+	double energyshift = 15;
+	constexpr double dt = 0.01;
 
 	uniform_int_distribution<> dist_n(0, n-1);
-	vector<pair<state_type, int>> changes;
+	//vector<pair<state_type, int>> changes;
+	map<state_type, int> changes_map; // better if spw >> 1
 
 	for (size_t iter = 0; !stop; ++iter) {
 		auto t1 = chrono::high_resolution_clock::now();
-		changes.clear();
+		//changes.clear();
+		changes_map.clear();
 
-		// H = -t \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1) - mu \sum_i n_i
+
+		// H = -t \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
 			const state_type& ste_i = i->first;
 			int w_i = i->second;
 			int s_i = signbit(w_i) ? -1 : 1;
 
-			binomial_distribution<> d(abs(w_i), t * dt);
-			int c_i = d(global_random_engine());
+			for (int c = abs(w_i); c > 0; --c) {
+				size_t k;
+				do {
+					k = dist_n(global_random_engine());
+				} while (ste_i[k] == 0);
 
-			// spawn
-			while (c_i) {
-				size_t k = dist_n(global_random_engine());
-				if (ste_i[k] > 0) {
-					state_type ste_j(ste_i);
-					ste_j[k]--;
+				uniform_int_distribution<> d(0, ngh[k].size()-1);
+				size_t l = ngh[k][d(global_random_engine())];
 
-					uniform_int_distribution<> d(0, ngh[k].size()-1);
-					size_t l = ngh[k][d(global_random_engine())];
-					ste_j[l]++;
-					// E = -t
-					// qj = -sign(E) qi => qj = qi
-					changes.emplace_back(ste_j, s_i);
-					c_i--;
+				state_type ste_j(ste_i);
+				ste_j[k]--;
+				ste_j[l]++;
+
+				double H = -t * sqrt(ste_i[k] * (ste_i[l]+1.0));
+				if (canonical() < abs(H * dt)) {
+					changes_map[ste_j] += s_i; // because H si always negative
 				}
 			}
 		}
 
+
 		auto t2 = chrono::high_resolution_clock::now();
 
+		// H = -t \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
 			const state_type& ste_i = i->first;
 
 			// diag
 			double E = 0.0;
 			for (size_t k = 0; k < n; ++k) {
-				E += ste_i[k] * (U*(ste_i[k] - 1)/2.0 - mu);
+				E += ste_i[k] * (ste_i[k] - 1);
 			}
+			E *= U / 2.0;
 			E -= energyshift;
 			// if E < 0 => clone
 			i->second += binomial_throw(i->second, clamp(-1.0, -E * dt, 1.0));
 		}
 		auto t3 = chrono::high_resolution_clock::now();
 
-		for (size_t k = 0; k < changes.size(); ++k) walkers[changes[k].first] += changes[k].second;
+		//for (size_t k = 0; k < changes.size(); ++k) walkers[changes[k].first] += changes[k].second;
+
+
+		for (auto i = changes_map.begin(); i != changes_map.end(); ++i) {
+			walkers[i->first] += i->second;
+		}
 
 		auto t4 = chrono::high_resolution_clock::now();
 
@@ -133,16 +145,15 @@ int main()
 			}
 		}
 
-
 		constexpr int A = 5;
 		if (iter > 20 && iter%A == 0) {
 			static double last_count_total_walkers = count_total_walkers;
-			constexpr double damping = 0.05;
+			constexpr double damping = 0.07;
 
 			energyshift -= damping / (A * dt) * log(count_total_walkers / last_count_total_walkers);
 			last_count_total_walkers = count_total_walkers;
 		}
-		if (iter % A == 0) {
+		if (iter % 1 == 0) {
 			cout << "@" << iter << ": " << count_total_walkers << "/" << walkers.size() << " es=" << energyshift << endl;
 			ofs << iter <<' '<< energyshift <<' '<< count_total_walkers <<' '<< walkers.size() << endl;
 		}
