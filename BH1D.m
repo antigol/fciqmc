@@ -76,6 +76,7 @@ end
 for j=2:Nsites
     H = H - Anc{j} * An{j-1} - Anc{j-1} * An{j};
 end
+H = H - Anc{1} * An{Nsites} - Anc{Nsites} * An{1};
 
 % Select states with N particles only
 jmax = find(round(full(diag(Ntot))) == Np);          % Find states with Np particles
@@ -96,7 +97,7 @@ for j=1:Nsites
     Nn{j} = ttt;
 end
 
-[~,a] = eigs(H,1,-3)
+[~,a] = eigs(H,1,-4)
 
 
 
