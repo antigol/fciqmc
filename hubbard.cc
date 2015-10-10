@@ -46,6 +46,7 @@ double scalar_product(const map<state_type, double, KeyCompare>& a,
 	return r;
 }
 
+
 sig_atomic_t stop = 0;
 void int_handler(int)
 {
@@ -74,14 +75,17 @@ int main()
 	}
 	walkers[start] = 1;
 
-	map<state_type, double, KeyCompare> try_state;
-	try_state[start] = 1;
-	map<state_type, double, KeyCompare> try_state_h;
-	for (auto i = try_state.begin(); i != try_state.end(); ++i) {
+	map<state_type, double, KeyCompare> ket;
+	ket[start] = 1;
+
+	map<state_type, double, KeyCompare> hket;
+	for (auto i = ket.begin(); i != ket.end(); ++i) {
 		const state_type& ste_i = i->first;
-		double diag = 0.0;
-		for (size_t k = 0; k < n; ++k) diag += ste_i[k] * (ste_i[k] - 1);
-		try_state_h[ste_i] += U/2.0 * diag;
+
+		double repulsion = 0.0;
+		for (size_t k = 0; k < n; ++k) repulsion += ste_i[k] * (ste_i[k] - 1);
+		hket[ste_i] += U/2.0 * repulsion * i->second;
+
 		for (size_t k = 0; k < n; ++k) {
 			if (ste_i[k] == 0) continue;
 			for (size_t l : ngh[k]) {
@@ -89,7 +93,7 @@ int main()
 				ste_j[k]--;
 				ste_j[l]++;
 
-				try_state_h[ste_j] += -sqrt(ste_i[k] * (ste_i[l]+1.0));
+				hket[ste_j] += -sqrt(ste_i[k] * (ste_i[l]+1.0)) * i->second;
 			}
 		}
 	}
@@ -97,7 +101,6 @@ int main()
 	double energyshift = 5;
 	constexpr double dt = 0.02;
 
-	uniform_int_distribution<> dist_n(0, n-1);
 	uniform_int_distribution<> dist_ngh(0, ngh_size-1);
 
 	map<state_type, int> tmp_map;
@@ -108,26 +111,29 @@ int main()
 
 
 		// H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
+		vector<size_t> ks;
+		ks.reserve(n);
 		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
 			const state_type& ste_i = i->first;
 			int w_i = i->second;
 			int s_i = (w_i < 0.0) ? -1 : 1;
 
-			for (int c = abs(w_i); c > 0; --c) {
-				size_t k;
-				size_t l;
-				do {
-					k = dist_n(global_random_engine());
-					l = ngh[k][dist_ngh(global_random_engine())];
-				} while (ste_i[k] == 0);
+			ks.clear();
+			for (size_t k = 0; k < n; ++k) {
+				if (ste_i[k] != 0) ks.push_back(k);
+			}
+			uniform_int_distribution<> dist_ks(0, ks.size()-1);
 
+			for (int c = abs(w_i); c > 0; --c) {
+				size_t k = ks[dist_ks(global_random_engine())];
+				size_t l = ngh[k][dist_ngh(global_random_engine())];
 
 				state_type ste_j(ste_i);
 				ste_j[k]--;
 				ste_j[l]++;
 
-				double H = -sqrt(ste_i[k] * (ste_i[l]+1.0));
-				if (canonical() < abs(H * dt)) {
+				double K = -sqrt(ste_i[k] * (ste_i[l]+1.0)) * ks.size() * ngh_size;
+				if (canonical() < abs(K * dt)) {
 					tmp_map[ste_j] += s_i; // because H si always negative
 				}
 			}
@@ -180,17 +186,45 @@ int main()
 		constexpr int A = 5;
 		if (iter > 20 && iter%A == 0) {
 			static double last_count_total_walkers = count_total_walkers;
-			constexpr double damping = 0.07;
+			constexpr double damping = 0.05;
 
 			energyshift -= damping / (A * dt) * log(count_total_walkers / last_count_total_walkers);
 			last_count_total_walkers = count_total_walkers;
 		}
-		if (iter % 1 == 0) {
-			double energy = scalar_product(try_state_h, walkers) / scalar_product(try_state, walkers);
+		if (iter % 2 == 0) {
+			double energy = scalar_product(hket, walkers) / scalar_product(ket, walkers);
 
 			cout << "@" << iter << ": " << count_total_walkers << "/" << walkers.size() << " es=" << energyshift << " en=" << energy << endl;
-			ofs<<iter<<count_total_walkers <<' '<<walkers.size()<<' '<<energyshift<<' '<<energy<<' '<<endl;
+			ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.size()<<' '<<energyshift<<' '<<energy<<' '<<endl;
 		}
+
+		if (iter%500 == 0) {
+			ket.clear();
+			for (auto i = walkers.begin(); i != walkers.end(); ++i) {
+				ket[i->first] += i->second;
+			}
+
+			hket.clear();
+			for (auto i = ket.begin(); i != ket.end(); ++i) {
+				const state_type& ste_i = i->first;
+
+				double repulsion = 0.0;
+				for (size_t k = 0; k < n; ++k) repulsion += ste_i[k] * (ste_i[k] - 1);
+				hket[ste_i] += U/2.0 * repulsion * i->second;
+
+				for (size_t k = 0; k < n; ++k) {
+					if (ste_i[k] == 0) continue;
+					for (size_t l : ngh[k]) {
+						state_type ste_j = ste_i;
+						ste_j[k]--;
+						ste_j[l]++;
+
+						hket[ste_j] += -sqrt(ste_i[k] * (ste_i[l]+1.0)) * i->second;
+					}
+				}
+			}
+		}
+
 		auto t5 = chrono::high_resolution_clock::now();
 
 
