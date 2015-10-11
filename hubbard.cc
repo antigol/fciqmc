@@ -13,7 +13,7 @@ using namespace std;
 
 // H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 constexpr double U = 10.0;
-constexpr size_t n = 7;
+constexpr size_t n = 8;
 typedef array<uint8_t, n> state_type;
 
 
@@ -177,12 +177,15 @@ int main()
 						ci -= di;
 					}
 
-					// di walkers sont tombés sur <k,l> avec probabilité 1/ks.size * 1/ngh[k].size
+					// di walkers sont tombés sur la connexion orientée <kl> avec probabilité de 1/ks.size * 1/ngh[k].size
 					state_type ste_j(ste_i);
 					ste_j[k]--;
 					ste_j[l]++;
 
-					tmp_map[ste_j] += s_i * binomial_throw(di, dt * sqrt(ste_i[k] * ste_j[l]) * ks.size() * ngh[k].size()); // <i|H|j>  < 0 !
+					// <i|H|j>  < 0 !
+					// p = - <i|H|j> * dt / P(<ij>)
+					double p = dt * sqrt(ste_i[k] * ste_j[l]) * ks.size() * ngh[k].size();
+					tmp_map[ste_j] += s_i * binomial_throw(di, p);
 				}
 			}
 
@@ -222,8 +225,14 @@ int main()
 			}
 			E *= U / 2.0;
 			E -= energyshift;
-			// if E < 0 => clone
-			i->second += binomial_throw(w_i, clamp(-1.0, -E * dt, 1.0));
+			// if the energy is negative, then we must clone the walkers.
+
+			double p = clamp(-1.0, -E * dt, 1.0); // probability to clone(positive value) / kill(negative value)
+			if (w_i < 0) {
+				w_i = -w_i;
+				p = -p;
+			}
+			i->second += binomial_throw(w_i, p);
 		}
 
 		auto t3 = chrono::high_resolution_clock::now();

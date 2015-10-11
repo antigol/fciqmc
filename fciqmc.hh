@@ -23,13 +23,10 @@ inline int random_round(double x)
 	return a;
 }
 
+// n must be positive, but p can take any value
 int binomial_throw(int n, double p)
 {
-	if (n < 0) {
-		n = -n;
-		p = -p;
-	}
-	int a = floor(p);
+	int a = std::floor(p);
 	std::binomial_distribution<> distribution(n, p-a);
 	return n * a + distribution(global_random_engine());
 }
