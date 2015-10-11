@@ -12,7 +12,7 @@ using namespace std;
 
 // H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 constexpr double U = 10.0;
-constexpr size_t n = 16;
+constexpr size_t n = 8;
 typedef array<uint8_t, n> state_type;
 
 
@@ -120,11 +120,13 @@ int main()
 
 	map<state_type, double> hket = hamiltonian(ket, ngh);
 
-	double energyshift = 10;
+	double energyshift = 30;
 	constexpr double dt = 0.01;
 
 
 	map<state_type, int> tmp_map;
+
+	auto t_begin = chrono::high_resolution_clock::now();
 
 	for (size_t iter = 0; state < 3; ++iter) {
 		auto t1 = chrono::high_resolution_clock::now();
@@ -295,6 +297,11 @@ int main()
 
 	cout << "chrono : spw"<<round(time1)<<" +dg"<<round(time2)<<" +cgs"<<round(time3)<<" +ann"<<round(time4)
 		 <<"= "<<round(time1+time2+time3+time4)<< " (ms in average)" << endl;
+
+	auto t_end = chrono::high_resolution_clock::now();
+	double t_total = chrono::duration_cast<chrono::duration<double>>(t_end - t_begin).count();
+	cout << "Total time : " << t_total << " seconds." << endl;
+
 	ofs.close();
 	return 0;
 }
