@@ -3,6 +3,7 @@
 #include <map>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include <csignal>
 #include <chrono>
 
@@ -12,7 +13,7 @@ using namespace std;
 
 // H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 constexpr double U = 10.0;
-constexpr size_t n = 8;
+constexpr size_t n = 7;
 typedef array<uint8_t, n> state_type;
 
 
@@ -99,6 +100,7 @@ int main()
 {
 	signal(SIGINT, int_handler);
 	ofstream ofs("data");
+	ofs<<setprecision(15);
 
 	double time1 = 0.0, time2 = 0.0, time3 = 0.0, time4 = 0.0;
 
@@ -113,7 +115,7 @@ int main()
 	for (size_t k = 0; k < n; ++k) {
 		start[k] = 1;
 	}
-	walkers[start] = 1;
+	walkers[start] = 100;
 
 	map<state_type, int> ket;
 	ket[start] = 1;
@@ -125,17 +127,18 @@ int main()
 
 
 	map<state_type, int> tmp_map;
+	vector<size_t> ks;
+	ks.reserve(n);
 
 	auto t_begin = chrono::high_resolution_clock::now();
 
 	for (size_t iter = 0; state < 3; ++iter) {
+
 		auto t1 = chrono::high_resolution_clock::now();
 		tmp_map.clear();
 
 
 		// H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
-		vector<size_t> ks;
-		ks.reserve(n);
 		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
 			const state_type& ste_i = i->first;
 			int w_i = i->second;
@@ -159,8 +162,8 @@ int main()
 				if (ki < ks.size() - 1) {
 					binomial_distribution<> dist_k(c, 1.0 / (double)(ks.size() - ki));
 					ci = dist_k(global_random_engine());
+					c -= ci;
 				}
-				c -= ci;
 
 				for (size_t li = 0; li < ngh[k].size(); ++li) {
 					if (ci == 0) break;
@@ -171,8 +174,8 @@ int main()
 					if (li < ngh[k].size() - 1) {
 						binomial_distribution<> dist_l(ci, 1.0 / (double)(ngh[k].size() - li));
 						di = dist_l(global_random_engine());
+						ci -= di;
 					}
-					ci -= di;
 
 					// di walkers sont tombés sur <k,l> avec probabilité 1/ks.size * 1/ngh[k].size
 					state_type ste_j(ste_i);
@@ -203,9 +206,9 @@ int main()
 			}
 #endif
 		}
-
-
 		auto t2 = chrono::high_resolution_clock::now();
+
+
 
 		// H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
@@ -222,8 +225,8 @@ int main()
 			// if E < 0 => clone
 			i->second += binomial_throw(w_i, clamp(-1.0, -E * dt, 1.0));
 		}
-		auto t3 = chrono::high_resolution_clock::now();
 
+		auto t3 = chrono::high_resolution_clock::now();
 #define ITER
 #ifdef ITER
 		{
@@ -248,8 +251,8 @@ int main()
 			walkers[i->first] += i->second;
 		}
 #endif
-
 		auto t4 = chrono::high_resolution_clock::now();
+
 
 		// annihilation
 		double count_total_walkers = 0.0;
