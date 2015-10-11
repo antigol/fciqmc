@@ -15,29 +15,28 @@ constexpr double U = 10.0;
 constexpr size_t n = 8;
 typedef array<uint8_t, n> state_type;
 
-struct KeyCompare {
-	bool operator()(const state_type& lhs, const state_type& rhs) const
-	{
-		for (size_t k = 0; k < n; ++k) {
-			if (lhs[k] < rhs[k]) return true;
-			if (lhs[k] > rhs[k]) return false;
-		}
-		return false;
-	}
-} keyCompare;
 
-double scalar_product(const map<state_type, double, KeyCompare>& a,
-											const map<state_type, int, KeyCompare>& b)
+bool operator<(const state_type& lhs, const state_type& rhs)
+{
+	for (size_t k = 0; k < n; ++k) {
+		if (lhs[k] < rhs[k]) return true;
+		if (lhs[k] > rhs[k]) return false;
+	}
+	return false;
+}
+
+double scalar_product(const map<state_type, double>& a,
+					  const map<state_type, int>& b)
 {
 	double r = 0.0;
 	auto i = a.begin();
 	auto j = b.begin();
 
 	while (i != a.end() && j != b.end()) {
-		if (keyCompare(i->first, j->first)) ++i;
-		else if (keyCompare(j->first, i->first)) ++j;
+		if (i->first < j->first) ++i;
+		else if (j->first < i->first) ++j;
 		else {
-			r += i->second * j->second;
+			r += i->second * (double)j->second;
 			++i;
 			++j;
 		}
@@ -46,18 +45,18 @@ double scalar_product(const map<state_type, double, KeyCompare>& a,
 	return r;
 }
 
-double scalar_product(const map<state_type, int, KeyCompare>& a,
-											const map<state_type, int, KeyCompare>& b)
+double scalar_product(const map<state_type, int>& a,
+					  const map<state_type, int>& b)
 {
 	double r = 0.0;
 	auto i = a.begin();
 	auto j = b.begin();
 
 	while (i != a.end() && j != b.end()) {
-		if (keyCompare(i->first, j->first)) ++i;
-		else if (keyCompare(j->first, i->first)) ++j;
+		if (i->first < j->first) ++i;
+		else if (j->first < i->first) ++j;
 		else {
-			r += i->second * j->second;
+			r += (double)i->second * (double)j->second;
 			++i;
 			++j;
 		}
@@ -66,9 +65,9 @@ double scalar_product(const map<state_type, int, KeyCompare>& a,
 	return r;
 }
 
-const map<state_type, double, KeyCompare> hamiltonian(const map<state_type, int, KeyCompare>& ket, vector<size_t> ngh[])
+const map<state_type, double> hamiltonian(const map<state_type, int>& ket, vector<size_t> ngh[])
 {
-	map<state_type, double, KeyCompare> hket;
+	map<state_type, double> hket;
 	for (auto i = ket.begin(); i != ket.end(); ++i) {
 		const state_type& ste_i = i->first;
 
@@ -108,7 +107,7 @@ int main()
 		ngh[k] = {(k-1+n)%n, (k+1)%n};
 	}
 
-	map<state_type, int, KeyCompare> walkers;
+	map<state_type, int> walkers;
 
 	state_type start;
 	for (size_t k = 0; k < n; ++k) {
@@ -116,10 +115,10 @@ int main()
 	}
 	walkers[start] = 1;
 
-	map<state_type, int, KeyCompare> ket;
+	map<state_type, int> ket;
 	ket[start] = 1;
 
-	map<state_type, double, KeyCompare> hket = hamiltonian(ket, ngh);
+	map<state_type, double> hket = hamiltonian(ket, ngh);
 
 	double energyshift = 10;
 	constexpr double dt = 0.01;
@@ -274,7 +273,7 @@ int main()
 	}
 
 	cout << "chrono : spw"<<round(time1)<<" +dg"<<round(time2)<<" +cgs"<<round(time3)<<" +ann"<<round(time4)
-			 <<"= "<<round(time1+time2+time3+time4)<< " (ms in average)" << endl;
+		 <<"= "<<round(time1+time2+time3+time4)<< " (ms in average)" << endl;
 	ofs.close();
 	return 0;
 }
