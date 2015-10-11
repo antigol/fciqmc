@@ -12,7 +12,7 @@ using namespace std;
 
 // H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 constexpr double U = 10.0;
-constexpr size_t n = 8;
+constexpr size_t n = 16;
 typedef array<uint8_t, n> state_type;
 
 
@@ -126,7 +126,7 @@ int main()
 
 	map<state_type, int> tmp_map;
 
-	for (size_t iter = 0; state != 3; ++iter) {
+	for (size_t iter = 0; state < 3; ++iter) {
 		auto t1 = chrono::high_resolution_clock::now();
 		tmp_map.clear();
 
@@ -144,8 +144,8 @@ int main()
 				if (ste_i[k] != 0) ks.push_back(k);
 			}
 
-#define BINO
 
+#define BINO
 #ifdef BINO
 			int c = abs(w_i);
 			for (size_t ki = 0; ki < ks.size(); ++ki) {
@@ -177,7 +177,7 @@ int main()
 					ste_j[k]--;
 					ste_j[l]++;
 
-					tmp_map[ste_j] += s_i * binomial_throw(di, dt * sqrt(ste_i[k] * ste_j[l]) * ks.size() * ngh[k].size());
+					tmp_map[ste_j] += s_i * binomial_throw(di, dt * sqrt(ste_i[k] * ste_j[l]) * ks.size() * ngh[k].size()); // <i|H|j>  < 0 !
 				}
 			}
 
@@ -222,9 +222,30 @@ int main()
 		}
 		auto t3 = chrono::high_resolution_clock::now();
 
+#define ITER
+#ifdef ITER
+		{
+			auto i = walkers.begin();
+			auto j = tmp_map.begin();
+			while (i != walkers.end() && j != tmp_map.end()) {
+				if (i->first < j->first) {
+					++i;
+				} else if (j->first < i->first) {
+					walkers.insert(i, *j);
+					++j;
+				} else {
+					i->second += j->second;
+					++i;
+					++j;
+				}
+			}
+			walkers.insert(j, tmp_map.end());
+		}
+#else
 		for (auto i = tmp_map.begin(); i != tmp_map.end(); ++i) {
 			walkers[i->first] += i->second;
 		}
+#endif
 
 		auto t4 = chrono::high_resolution_clock::now();
 
@@ -239,8 +260,8 @@ int main()
 			}
 		}
 
-		constexpr int A = 5;
-		if (iter > 50 && iter%A == 0) {
+		constexpr int A = 3;
+		if (iter > 10 && iter%A == 0) {
 			static double last_count_total_walkers = count_total_walkers;
 			constexpr double damping = 0.10;
 

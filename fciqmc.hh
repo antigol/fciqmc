@@ -30,7 +30,7 @@ int binomial_throw(int n, double p)
 		p = -p;
 	}
 	int a = floor(p);
-	std::binomial_distribution<int> distribution(n, p-a);
+	std::binomial_distribution<> distribution(n, p-a);
 	return n * a + distribution(global_random_engine());
 }
 
