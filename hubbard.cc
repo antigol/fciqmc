@@ -27,7 +27,7 @@ bool operator<(const state_type& lhs, const state_type& rhs)
 }
 
 double scalar_product(const map<state_type, double>& a,
-					  const map<state_type, int>& b)
+											const map<state_type, int>& b)
 {
 	double r = 0.0;
 	auto i = a.begin();
@@ -47,7 +47,7 @@ double scalar_product(const map<state_type, double>& a,
 }
 
 double scalar_product(const map<state_type, int>& a,
-					  const map<state_type, int>& b)
+											const map<state_type, int>& b)
 {
 	double r = 0.0;
 	auto i = a.begin();
@@ -102,7 +102,8 @@ int main()
 	ofstream ofs("data");
 	ofs<<setprecision(15);
 
-	double time1 = 0.0, time2 = 0.0, time3 = 0.0, time4 = 0.0;
+	double time1 = 0.0, time3 = 0.0, time4 = 0.0;
+	double menergy = 0.0;
 
 	vector<size_t> ngh[n];
 	for (size_t k = 0; k < n; ++k) {
@@ -158,26 +159,26 @@ int main()
 
 				size_t k = ks[ki];
 
-				int ci = c;
+				int ck = c; // number of walkers spawning on <k?>
 				if (ki < ks.size() - 1) {
 					binomial_distribution<> dist_k(c, 1.0 / (double)(ks.size() - ki));
-					ci = dist_k(global_random_engine());
-					c -= ci;
+					ck = dist_k(global_random_engine());
+					c -= ck;
 				}
 
 				for (size_t li = 0; li < ngh[k].size(); ++li) {
-					if (ci == 0) break;
+					if (ck == 0) break;
 
 					size_t l = ngh[k][li];
 
-					int di = ci;
+					int ckl = ck; // number of walkers spawning on <kl>
 					if (li < ngh[k].size() - 1) {
-						binomial_distribution<> dist_l(ci, 1.0 / (double)(ngh[k].size() - li));
-						di = dist_l(global_random_engine());
-						ci -= di;
+						binomial_distribution<> dist_l(ck, 1.0 / (double)(ngh[k].size() - li));
+						ckl = dist_l(global_random_engine());
+						ck -= ckl;
 					}
 
-					// di walkers sont tombés sur la connexion orientée <kl> avec probabilité de 1/ks.size * 1/ngh[k].size
+					// ckl walkers spawns on connexion <kl> (oriented) with probability (1/ks.size * 1/ngh[k].size)
 					state_type ste_j(ste_i);
 					ste_j[k]--;
 					ste_j[l]++;
@@ -185,7 +186,7 @@ int main()
 					// <i|H|j>  < 0 !
 					// p = - <i|H|j> * dt / P(<ij>)
 					double p = dt * sqrt(ste_i[k] * ste_j[l]) * ks.size() * ngh[k].size();
-					tmp_map[ste_j] += s_i * binomial_throw(di, p);
+					tmp_map[ste_j] += s_i * binomial_throw(ckl, p);
 				}
 			}
 
@@ -208,17 +209,9 @@ int main()
 				}
 			}
 #endif
-		}
-		auto t2 = chrono::high_resolution_clock::now();
 
-
-
-		// H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
-		for (auto i = walkers.begin(); i != walkers.end(); ++i) {
-			const state_type& ste_i = i->first;
-			int w_i = i->second;
-
-			// diag
+			// H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
+			// diagonal part
 			double E = 0.0;
 			for (size_t k = 0; k < n; ++k) {
 				E += ste_i[k] * (ste_i[k] - 1);
@@ -228,14 +221,14 @@ int main()
 			// if the energy is negative, then we must clone the walkers.
 
 			double p = clamp(-1.0, -E * dt, 1.0); // probability to clone(positive value) / kill(negative value)
-			if (w_i < 0) {
-				w_i = -w_i;
-				p = -p;
-			}
-			i->second += binomial_throw(w_i, p);
+			if (w_i < 0)
+				i->second -= binomial_throw(-w_i, p);
+			else
+				i->second += binomial_throw(w_i, p);
 		}
-
+		auto t2 = chrono::high_resolution_clock::now();
 		auto t3 = chrono::high_resolution_clock::now();
+
 #define ITER
 #ifdef ITER
 		{
@@ -294,6 +287,7 @@ int main()
 
 		if (iter%2 == 0) {
 			double energy = scalar_product(hket, walkers) / scalar_product(ket, walkers);
+			menergy = 0.75 * menergy + 0.25 * energy;
 
 			cout << "@" << iter << ": " << count_total_walkers << "/" << walkers.size() << " es=" << energyshift << " en=" << energy << endl;
 			ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.size()<<' '<<energyshift<<' '<<energy<<' '<<endl;
@@ -302,17 +296,16 @@ int main()
 
 
 		time1 = (time1 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t2 - t1).count()) / (iter + 1);
-		time2 = (time2 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t3 - t2).count()) / (iter + 1);
 		time3 = (time3 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t4 - t3).count()) / (iter + 1);
 		time4 = (time4 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t5 - t4).count()) / (iter + 1);
 	}
 
-	cout << "chrono : spw"<<round(time1)<<" +dg"<<round(time2)<<" +cgs"<<round(time3)<<" +ann"<<round(time4)
-		 <<"= "<<round(time1+time2+time3+time4)<< " (ms in average)" << endl;
+	cout << "chrono : spwdg"<<round(time1)<<" +cgs"<<round(time3)<<" +ann"<<round(time4)
+			 <<"= "<<round(time1+time3+time4)<< " (ms in average)" << endl;
 
 	auto t_end = chrono::high_resolution_clock::now();
 	double t_total = chrono::duration_cast<chrono::duration<double>>(t_end - t_begin).count();
-	cout << "Total time : " << t_total << " seconds." << endl;
+	cout << "Total time : " << t_total << " seconds. Mean energy : " << setprecision(15)<< menergy << endl;
 
 	ofs.close();
 	return 0;

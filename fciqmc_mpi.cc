@@ -11,7 +11,7 @@
 #undef TIMING
 //#define TIMING
 #undef USEMPI
-//#define USEMPI
+#define USEMPI
 
 #ifdef TIMING
 #include <chrono>

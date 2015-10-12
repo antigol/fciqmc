@@ -8,7 +8,7 @@ tic;
 
 % Define parameters (energies in units of hopping energy T)
 Nmax = 8;                       % Max number of quanta per site
-Nsites = 8;                     % Number of sites
+Nsites = Nmax;                     % Number of sites
 Np = Nsites;                    % Number of particles
 Nstates = (Nmax + 1)^Nsites;    % Total number of Fock states
 U = 10.0;                       % Bose-Hubbard energy

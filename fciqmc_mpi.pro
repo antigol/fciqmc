@@ -8,7 +8,8 @@ LIBS += -pthread
 SOURCES += fciqmc_mpi.cc
 
 HEADERS += \
-    fciqmc.hh
+    fciqmc.hh \
+    mpi_map.hh
 
 QMAKE_CXXFLAGS_RELEASE -= -O
 QMAKE_CXXFLAGS_RELEASE -= -O1
