@@ -4,6 +4,7 @@
 #include <map>
 #include <vector>
 #include <string>
+#include <iostream>
 #include <mpi/mpi.h>
 
 template<class K, class T>
@@ -26,6 +27,7 @@ public:
 		};
 		int len;
 
+		std::cout << mp_rank << ": SEND MAP" << endl;
 		{ // SEND MAP
 			int dst = 0;
 			for (auto i = map.begin(); i != map.end(); ++i) {
@@ -50,6 +52,8 @@ public:
 			}
 		}
 
+
+		std::cout << mp_rank << ": RECV MAP" << endl;
 		{ // RECV MAP
 			for (int src = 0; src < mp_size; ++src) {
 				if (src != mp_rank) {
@@ -66,6 +70,7 @@ public:
 			}
 		}
 
+		std::cout << mp_rank << ": SIZES" << endl;
 		{ // SEND/RECV SIZES
 			int size = m_map.size();
 			for (int r = 0; r < mp_size; ++r) {
@@ -83,49 +88,89 @@ public:
 			}
 		}
 
-		size_t total = 0;
+		int total = 0;
 		for (size_t s : m_sizes) total += s;
-		size_t q = total / mp_size;
-		size_t r = total % mp_size;
+		int q = total / mp_size;
+		int r = total % mp_size;
 
-		size_t left = 0;
+		int left = 0;
 		for (int i = 0; i < mp_rank; ++i) left += m_sizes[i];
-		size_t right = total - m_sizes[mp_rank] - left;
+		int right = total - m_sizes[mp_rank] - left;
 
-		size_t tleft = q * mp_rank + std::min(mp_rank, r);
-		size_t tright = total - tleft - q;
+		int tleft = q * mp_rank + std::min(mp_rank, r);
+		int tright = total - tleft - q;
 		if (mp_rank < r) tright -= 1;
 
 		// [q+1] [q+1] ... [q+1] [q] [q] ... [q]
 		// \------ r times ----/
 
-		// send/recv to neighbours
+		std::cout << mp_rank << ": SEND NEIGH" << endl;
+		// SEND TO NEIGHBOUR
 		if (left < tleft) {
 			// send (tleft - left) to the left
-			int sleft = std::min(m_map.size(), tleft - left);
+			int sleft = std::min<int>(m_map.size(), tleft - left);
 			// begin by send map.begin
+			int dst = mp_rank - 1;
+			auto i = m_map.begin();
+			for (int n = 0; n < sleft; ++n) {
+				std::string message = serialize(*i); ++i;
+				len = message.size();
+				MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
+				MPI_Send((void*)message.data(), len, MPI_BYTE, dst, tag_data, MPI_COMM_WORLD);
+			}
+			len = 0;
+			MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
 		}
 		if (right < tright) {
-			int sright = std::min(m_map.size(), tright - right);
+			int sright = std::min<int>(m_map.size(), tright - right);
 			// begin by send end
-
+			int dst = mp_rank + 1;
+			auto i = m_map.end();
+			for (int n = 0; n < sright; ++n) {
+				--i;
+				std::string message = serialize(*i);
+				len = message.size();
+				MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
+				MPI_Send((void*)message.data(), len, MPI_BYTE, dst, tag_data, MPI_COMM_WORLD);
+			}
+			len = 0;
+			MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
 		}
 
-		// recv
+		std::cout << mp_rank << ": RECV NEIGH" << endl;
+		// RECV FROM NEIGHBOUR
 		if (mp_rank > 0) {
 			int len = 1;
+			std::string message;
 			while (len > 0) {
-				MPI_Recv(&len, 1, MPI_INT, mp_rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				MPI_Recv(&len, 1, MPI_INT, mp_rank-1, tag_length, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 				if (len > 0) {
-					MPI_Recv(&data, len, MPI_BYTE, mp_rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-					m_map.insert(m_map.begin(), pair);
+					message.resize(len);
+					MPI_Recv((void*)message.data(), len, MPI_BYTE, mp_rank-1, tag_data, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					m_map.insert(m_map.begin(), unserialize(message));
 				}
 			}
 		}
+
+		if (mp_rank < mp_size - 1) {
+			int len = 1;
+			std::string message;
+			while (len > 0) {
+				MPI_Recv(&len, 1, MPI_INT, mp_rank+1, tag_length, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				if (len > 0) {
+					message.resize(len);
+					MPI_Recv((void*)message.data(), len, MPI_BYTE, mp_rank+1, tag_data, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					m_map.insert(m_map.end(), unserialize(message));
+				}
+			}
+		}
+
+
 	}
 
-	std::map<K,T>::iterator begin() { return m_map.begin(); }
-	std::map<K,T>::iterator end() { return m_map.end(); }
+	typename std::map<K,T>::iterator begin() { return m_map.begin(); }
+
+	typename std::map<K,T>::iterator end() { return m_map.end(); }
 
 private:
 	int mp_rank;

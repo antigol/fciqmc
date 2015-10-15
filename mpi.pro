@@ -5,7 +5,7 @@ CONFIG -= qt
 CONFIG += c++11
 LIBS += -pthread
 
-SOURCES += fciqmc_mpi.cc
+SOURCES += test.cc
 
 HEADERS += \
     fciqmc.hh \
