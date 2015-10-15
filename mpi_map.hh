@@ -17,40 +17,111 @@ public:
 		m_begins.resize(mp_size);
 	}
 
-	void add(const K& k, const T& v)
+	void mpi_sumup(const std::map<K,T>& map)
 	{
-		// find where with m_begins
-		int dst = 0;
-		for (int i = 1; i < mp_size; ++i) {
-			if (m_sizes[i] == 0 || m_begins[i] < k || m_begins[i] == k) {
-				dst = i;
-			} else {
-				break;
+		enum {
+			tag_length = 0,
+			tag_data,
+			tag_size
+		};
+		int len;
+
+		{ // SEND MAP
+			int dst = 0;
+			for (auto i = map.begin(); i != map.end(); ++i) {
+				// find rank to send data to
+				while (dst+1 < mp_size && m_sizes[dst+1]!=0 && !(i->first<m_begins[dst+1])) ++dst;
+
+				if (dst == mp_rank) {
+					m_map.insert(*i);
+				} else {
+					// send to rank
+					std::string message = serialize(*i);
+					len = message.size();
+					MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
+					MPI_Send((void*)message.data(), len, MPI_BYTE, dst, tag_data, MPI_COMM_WORLD);
+				}
+			}
+			len = 0;
+			for (dst = 0; dst < mp_size; ++dst) {
+				if (dst != mp_rank) {
+					MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
+				}
 			}
 		}
 
-		// send message
-		std::string message = serialize(k, v);
-		MPI_Send((void*)message.data(), message.size(), MPI_BYTE, dst, 0, MPI_COMM_WORLD);
-	}
+		{ // RECV MAP
+			for (int src = 0; src < mp_size; ++src) {
+				if (src != mp_rank) {
+					len = 1;
+					std::string message;
+					while (len > 0) {
+						MPI_Recv(&len, 1, MPI_INT, src, tag_length, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+						if (len == 0) break;
+						message.resize(len);
+						MPI_Recv((void*)message.data(), len, MPI_BYTE, src, tag_data, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+						m_map.insert(unserialize(message));
+					}
+				}
+			}
+		}
 
-	void mpi_sumup(const std::map<K,T>& map)
-	{
-		// add + synchronize
-	}
+		{ // SEND/RECV SIZES
+			int size = m_map.size();
+			for (int r = 0; r < mp_size; ++r) {
+				if (r != mp_rank) {
+					MPI_Send(&size, 1, MPI_INT, r, tag_size, MPI_COMM_WORLD);
+				}
+			}
+			for (int r = 0; r < mp_size; ++r) {
+				if (r == mp_rank) {
+					m_sizes[mp_rank] = m_map.size();
+				} else {
+					MPI_Recv(&size, 1, MPI_INT, r, tag_size, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					m_sizes[r] = size;
+				}
+			}
+		}
 
-	void synchronize()
-	{
-		// recv messages and add
+		size_t total = 0;
+		for (size_t s : m_sizes) total += s;
+		size_t q = total / mp_size;
+		size_t r = total % mp_size;
 
-		// send size
-		// recv sizes
+		size_t left = 0;
+		for (int i = 0; i < mp_rank; ++i) left += m_sizes[i];
+		size_t right = total - m_sizes[mp_rank] - left;
 
-		// send two neighbour to equilibrate
-		// recv from neighbour
+		size_t tleft = q * mp_rank + std::min(mp_rank, r);
+		size_t tright = total - tleft - q;
+		if (mp_rank < r) tright -= 1;
 
-		// send begin + size
-		// recv begins + sizes
+		// [q+1] [q+1] ... [q+1] [q] [q] ... [q]
+		// \------ r times ----/
+
+		// send/recv to neighbours
+		if (left < tleft) {
+			// send (tleft - left) to the left
+			int sleft = std::min(m_map.size(), tleft - left);
+			// begin by send map.begin
+		}
+		if (right < tright) {
+			int sright = std::min(m_map.size(), tright - right);
+			// begin by send end
+
+		}
+
+		// recv
+		if (mp_rank > 0) {
+			int len = 1;
+			while (len > 0) {
+				MPI_Recv(&len, 1, MPI_INT, mp_rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				if (len > 0) {
+					MPI_Recv(&data, len, MPI_BYTE, mp_rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					m_map.insert(m_map.begin(), pair);
+				}
+			}
+		}
 	}
 
 	std::map<K,T>::iterator begin() { return m_map.begin(); }
