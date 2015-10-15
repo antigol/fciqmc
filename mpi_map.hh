@@ -27,7 +27,7 @@ public:
 		};
 		int len;
 
-		std::cout << mp_rank << ": SEND MAP" << endl;
+		//std::cout << mp_rank << ": SEND MAP" << endl;
 		{ // SEND MAP
 			int dst = 0;
 			for (auto i = map.begin(); i != map.end(); ++i) {
@@ -53,7 +53,7 @@ public:
 		}
 
 
-		std::cout << mp_rank << ": RECV MAP" << endl;
+		//std::cout << mp_rank << ": RECV MAP" << endl;
 		{ // RECV MAP
 			for (int src = 0; src < mp_size; ++src) {
 				if (src != mp_rank) {
@@ -70,7 +70,7 @@ public:
 			}
 		}
 
-		std::cout << mp_rank << ": SIZES" << endl;
+		//std::cout << mp_rank << ": SIZES" << endl;
 		{ // SEND/RECV SIZES
 			int size = m_map.size();
 			for (int r = 0; r < mp_size; ++r) {
@@ -104,40 +104,51 @@ public:
 		// [q+1] [q+1] ... [q+1] [q] [q] ... [q]
 		// \------ r times ----/
 
-		std::cout << mp_rank << ": SEND NEIGH" << endl;
-		// SEND TO NEIGHBOUR
-		if (left < tleft) {
-			// send (tleft - left) to the left
-			int sleft = std::min<int>(m_map.size(), tleft - left);
-			// begin by send map.begin
+		//std::cout << mp_rank << ": SEND NEIGH" << endl;
+		{ // SEND TO NEIGHBOUR
 			int dst = mp_rank - 1;
-			auto i = m_map.begin();
-			for (int n = 0; n < sleft; ++n) {
-				std::string message = serialize(*i); ++i;
-				len = message.size();
+			if (dst >= 0) {
+				if (left < tleft) {
+					// send (tleft - left) to the left
+					int sleft = std::min<int>(m_map.size(), tleft - left);
+					// begin by send map.begin
+					auto i = m_map.begin();
+					for (int n = 0; n < sleft; ++n) {
+						std::string message = serialize(*i);
+						++i;
+						len = message.size();
+						MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
+						MPI_Send((void*)message.data(), len, MPI_BYTE, dst, tag_data, MPI_COMM_WORLD);
+					}
+					m_map.erase(m_map.begin(), i);
+				}
+				len = 0;
 				MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
-				MPI_Send((void*)message.data(), len, MPI_BYTE, dst, tag_data, MPI_COMM_WORLD);
 			}
-			len = 0;
-			MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
-		}
-		if (right < tright) {
-			int sright = std::min<int>(m_map.size(), tright - right);
-			// begin by send end
-			int dst = mp_rank + 1;
-			auto i = m_map.end();
-			for (int n = 0; n < sright; ++n) {
-				--i;
-				std::string message = serialize(*i);
-				len = message.size();
-				MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
-				MPI_Send((void*)message.data(), len, MPI_BYTE, dst, tag_data, MPI_COMM_WORLD);
-			}
-			len = 0;
-			MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
 		}
 
-		std::cout << mp_rank << ": RECV NEIGH" << endl;
+		{
+			int dst = mp_rank + 1;
+			if (dst < mp_size) {
+				if (right < tright) {
+					int sright = std::min<int>(m_map.size(), tright - right);
+					// begin by send end
+					auto i = m_map.end();
+					for (int n = 0; n < sright; ++n) {
+						--i;
+						std::string message = serialize(*i);
+						len = message.size();
+						MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
+						MPI_Send((void*)message.data(), len, MPI_BYTE, dst, tag_data, MPI_COMM_WORLD);
+					}
+					m_map.erase(i, m_map.end());
+				}
+				len = 0;
+				MPI_Send(&len, 1, MPI_INT, dst, tag_length, MPI_COMM_WORLD);
+			}
+		}
+
+		//std::cout << mp_rank << ": RECV NEIGH" << endl;
 		// RECV FROM NEIGHBOUR
 		if (mp_rank > 0) {
 			int len = 1;
@@ -165,12 +176,56 @@ public:
 			}
 		}
 
+		// SEND/RECV BEGINS
+		{
+			//std::cout << mp_rank << ": SEND BEGINS" << endl;
+			std::string message;
+			if (m_map.size() > 0)
+				message = serialize(*(m_map.begin()));
+			len = message.size();
+			for (int r = 0; r < mp_size; ++r) {
+				if (r != mp_rank) {
+					MPI_Send(&len, 1, MPI_INT, r, tag_length, MPI_COMM_WORLD);
+					if (len > 0) MPI_Send((void*)message.data(), len, MPI_BYTE, r, tag_data, MPI_COMM_WORLD);
+				}
+			}
 
+			//std::cout << mp_rank << ": RECV BEGINS" << endl;
+			for (int r = 0; r < mp_size; ++r) {
+				if (r != mp_rank) {
+					MPI_Recv(&len, 1, MPI_INT, r, tag_length, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					if (len > 0) {
+						message.resize(len);
+						MPI_Recv((void*)message.data(), len, MPI_BYTE, r, tag_data, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+						m_begins[r] = unserialize(message).first;
+					}
+				} else {
+					if (m_map.size() > 0) m_begins[r] = m_map.begin()->first;
+				}
+			}
+		}
+
+		//std::cout << mp_rank << ": SIZES" << endl;
+		{ // SEND/RECV SIZES
+			int size = m_map.size();
+			for (int r = 0; r < mp_size; ++r) {
+				if (r != mp_rank) {
+					MPI_Send(&size, 1, MPI_INT, r, tag_size, MPI_COMM_WORLD);
+				}
+			}
+			for (int r = 0; r < mp_size; ++r) {
+				if (r == mp_rank) {
+					m_sizes[mp_rank] = m_map.size();
+				} else {
+					MPI_Recv(&size, 1, MPI_INT, r, tag_size, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					m_sizes[r] = size;
+				}
+			}
+		}
 	}
 
 	typename std::map<K,T>::iterator begin() { return m_map.begin(); }
-
-	typename std::map<K,T>::iterator end() { return m_map.end(); }
+	typename std::map<K,T>::iterator end()   { return m_map.end();   }
 
 private:
 	int mp_rank;
