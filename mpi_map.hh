@@ -7,18 +7,18 @@
 #include <iostream>
 #include <mpi/mpi.h>
 
-template<class K, class T>
+template<class K>
 class mpi_map
 {
 public:
-	mpi_map(int rank, int size) :
-		mp_rank(rank), mp_size(size)
+	mpi_map(int rank, int size/*, MPI_Datatype type*/) :
+		mp_rank(rank), mp_size(size)//, mp_type(type)
 	{
 		m_sizes.resize(mp_size, 0);
 		m_begins.resize(mp_size);
 	}
 
-	void sync(const std::map<K,T>& map)
+	void sync(const std::map<K,int>& map)
 	{
 		enum {
 			tag_length = 0,
@@ -34,7 +34,7 @@ public:
 				while (dst+1 < mp_size && m_sizes[dst+1]!=0 && !(i->first<m_begins[dst+1])) ++dst;
 
 				if (dst == mp_rank) {
-					m_local.insert(*i);
+					m_local[i->first] += i->second;
 				} else {
 					// send to rank
 					std::string message = serialize(*i);
@@ -62,7 +62,7 @@ public:
 						if (len == 0) break;
 						message.resize(len);
 						MPI_Recv((void*)message.data(), len, MPI_BYTE, src, tag_data, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-						std::pair<K,T> kv = unserialize(message);
+						std::pair<K,int> kv = unserialize(message);
 						m_local[kv.first] += kv.second;
 					}
 				}
@@ -81,24 +81,12 @@ public:
 
 		{ // SEND/RECV SIZES
 			int size = m_local.size();
-			for (int r = 0; r < mp_size; ++r) {
-				if (r != mp_rank) {
-					MPI_Send(&size, 1, MPI_INT, r, tag_size, MPI_COMM_WORLD);
-				}
-			}
-			for (int r = 0; r < mp_size; ++r) {
-				if (r == mp_rank) {
-					m_sizes[mp_rank] = m_local.size();
-				} else {
-					MPI_Recv(&size, 1, MPI_INT, r, tag_size, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-					m_sizes[r] = size;
-				}
-			}
+			MPI_Allgather(&size, 1, MPI_INT, m_sizes.data(), mp_size, MPI_INT, MPI_COMM_WORLD);
 		}
 
 		{ // SEND TO NEIGHBOUR
 			int total = 0;
-			for (size_t s : m_sizes) total += s;
+			for (auto s : m_sizes) total += s;
 			int q = total / mp_size;
 			int r = total % mp_size;
 
@@ -206,41 +194,61 @@ public:
 				}
 			}
 		}
+		/*
+		if (0) {
+			K beg;
+			if (m_local.size() > 0)
+				beg = m_local.begin()->first;
 
-		{ // SEND/RECV SIZES
-			int size = m_local.size();
 			for (int r = 0; r < mp_size; ++r) {
 				if (r != mp_rank) {
-					MPI_Send(&size, 1, MPI_INT, r, tag_size, MPI_COMM_WORLD);
+					MPI_Send(&beg, 1, mp_type, r, 15, MPI_COMM_WORLD);
 				}
 			}
+
 			for (int r = 0; r < mp_size; ++r) {
-				if (r == mp_rank) {
-					m_sizes[mp_rank] = m_local.size();
+				if (r != mp_rank) {
+					MPI_Recv(&beg, 1, mp_type, r, 15, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					m_begins[r] = beg;
 				} else {
-					MPI_Recv(&size, 1, MPI_INT, r, tag_size, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-					m_sizes[r] = size;
+					if (m_local.size() > 0) m_begins[r] = m_local.begin()->first;
 				}
 			}
 		}
+		if (0) {
+			K beg;
+			if (m_local.size() > 0) beg = m_local.begin()->first;
+			MPI_Allgather(&beg, 1, mp_type, m_begins.data(), mp_size, mp_type, MPI_COMM_WORLD);
+		}*/
+
+		{ // SEND/RECV SIZES
+			int size = m_local.size();
+			MPI_Allgather(&size, 1, MPI_INT, m_sizes.data(), mp_size, MPI_INT, MPI_COMM_WORLD);
+		}
 	}
 
-	typename std::map<K,T>::iterator begin() { return m_local.begin(); }
-	typename std::map<K,T>::iterator end()   { return m_local.end();   }
+	typename std::map<K,int>::iterator begin() { return m_local.begin(); }
+	typename std::map<K,int>::iterator end()   { return m_local.end();   }
 	size_t size() const { return m_local.size(); }
 	size_t total_size() const {
 		size_t n = 0;
-		for (size_t x : m_sizes) n += x;
+		for (auto x : m_sizes) n += x;
+		return n;
+	}
+	int count() const {
+		int n = 0;
+		for (auto i = m_local.begin(); i != m_local.end(); ++i) n += abs(i->second);
 		return n;
 	}
 
 private:
 	int mp_rank;
 	int mp_size;
+	//MPI_Datatype mp_type;
 
-	std::vector<size_t> m_sizes;
+	std::vector<int> m_sizes;
 	std::vector<K> m_begins;
-	std::map<K,T> m_local;
+	std::map<K,int> m_local;
 };
 
 #endif // MPI_MAP_HH

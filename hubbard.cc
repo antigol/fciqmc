@@ -20,6 +20,7 @@ typedef array<uint8_t, n> state_type;
 
 #define USEMPI
 #ifdef USEMPI
+#include <sstream>
 
 string serialize(const pair<state_type,int>& kv)
 {
@@ -121,7 +122,7 @@ void int_handler(int)
 	state++;
 }
 
-int main()
+int main(int argc, char* argv[])
 {
 	signal(SIGINT, int_handler);
 	ofstream ofs("data");
@@ -135,17 +136,34 @@ int main()
 		ngh[k] = {(k-1+n)%n, (k+1)%n};
 	}
 
-#ifdef USEMPI
-	mpi_map<state_type, int> walkers;
-#else
-	map<state_type, int> walkers;
-#endif
-
 	state_type start;
 	for (size_t k = 0; k < n; ++k) {
 		start[k] = 1;
 	}
+	map<state_type, int> tmp_map;
+
+#ifdef USEMPI
+	MPI_Init(&argc, &argv);
+	int mpi_size;
+	MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+	int mpi_rank;
+	MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+
+	//MPI_Datatype mpi_state_type;
+	//MPI_Type_contiguous(n, MPI_UINT8_T, &mpi_state_type);
+	//MPI_Type_commit(&mpi_state_type);
+
+	mpi_map<state_type> walkers(mpi_rank, mpi_size/*,mpi_state_type*/);
+	tmp_map[start] = 100;
+	walkers.sync(tmp_map);
+	tmp_map.clear();
+#else
+	(void)argc;
+	(void)argv;
+	map<state_type, int> walkers;
 	walkers[start] = 100;
+#endif
+
 
 	map<state_type, int> ket;
 	ket[start] = 1;
@@ -156,7 +174,6 @@ int main()
 	constexpr double dt = 0.01;
 
 
-	map<state_type, int> tmp_map;
 	vector<size_t> ks;
 	ks.reserve(n);
 
@@ -292,6 +309,27 @@ int main()
 
 #ifdef USEMPI
 
+		double count_total_walkers = 0.0;
+		{
+			double count = walkers.count();
+			MPI_Reduce(&count, &count_total_walkers, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+		}
+
+		if (mpi_rank == 0) {
+			constexpr int A = 3;
+			if (iter > 10 && iter%A == 0) {
+				static double last_count_total_walkers = count_total_walkers;
+				constexpr double damping = 0.10;
+
+				energyshift -= damping / (A * dt) * log(count_total_walkers / last_count_total_walkers);
+				last_count_total_walkers = count_total_walkers;
+			}
+
+			cout<<"@"<<iter<<": "<<count_total_walkers<<"/"<<walkers.total_size()<<" es="<<energyshift
+				 << endl;
+			ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.total_size()<<' '<<energyshift<<endl;
+		}
+		MPI_Bcast(&energyshift, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 #else
 
@@ -315,7 +353,6 @@ int main()
 			last_count_total_walkers = count_total_walkers;
 		}
 
-		auto t5 = chrono::high_resolution_clock::now();
 
 		if (state == 1) {
 			state = 2;
@@ -333,6 +370,7 @@ int main()
 		}
 #endif
 
+		auto t5 = chrono::high_resolution_clock::now();
 
 
 		time1 = (time1 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t2 - t1).count()) / (iter + 1);
@@ -348,5 +386,10 @@ int main()
 	cout << "Total time : " << t_total << " seconds. Mean energy : " << setprecision(15)<< menergy << endl;
 
 	ofs.close();
+
+#ifdef USEMPI
+	//MPI_Type_free(&mpi_state_type);
+	MPI_Finalize();
+#endif
 	return 0;
 }
