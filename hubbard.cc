@@ -11,11 +11,36 @@
 
 using namespace std;
 
+
+
 // H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 constexpr double U = 10.0;
 constexpr size_t n = 8;
 typedef array<uint8_t, n> state_type;
 
+#define USEMPI
+#ifdef USEMPI
+
+string serialize(const pair<state_type,int>& kv)
+{
+	ostringstream oss;
+	for (size_t k = 0; k < n; ++k) oss << kv.first[k] << ' ';
+	oss << kv.second;
+	return oss.str();
+}
+
+pair<state_type,int> unserialize(const string& str)
+{
+	istringstream iss(str);
+	pair<state_type,int> kv;
+	for (size_t k = 0; k < n; ++k) iss >> kv.first[k];
+	iss >> kv.second;
+	return kv;
+}
+
+#include "mpi_map.hh"
+
+#endif
 
 bool operator<(const state_type& lhs, const state_type& rhs)
 {
@@ -110,7 +135,11 @@ int main()
 		ngh[k] = {(k-1+n)%n, (k+1)%n};
 	}
 
+#ifdef USEMPI
+	mpi_map<state_type, int> walkers;
+#else
 	map<state_type, int> walkers;
+#endif
 
 	state_type start;
 	for (size_t k = 0; k < n; ++k) {
@@ -229,6 +258,10 @@ int main()
 		auto t2 = chrono::high_resolution_clock::now();
 		auto t3 = chrono::high_resolution_clock::now();
 
+#ifdef USEMPI
+		walkers.sync(tmp_map);
+#else
+
 #define ITER
 #ifdef ITER
 		{
@@ -253,8 +286,14 @@ int main()
 			walkers[i->first] += i->second;
 		}
 #endif
+#endif
+
 		auto t4 = chrono::high_resolution_clock::now();
 
+#ifdef USEMPI
+
+
+#else
 
 		// annihilation
 		double count_total_walkers = 0.0;
@@ -292,6 +331,7 @@ int main()
 			cout << "@" << iter << ": " << count_total_walkers << "/" << walkers.size() << " es=" << energyshift << " en=" << energy << endl;
 			ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.size()<<' '<<energyshift<<' '<<energy<<' '<<endl;
 		}
+#endif
 
 
 

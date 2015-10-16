@@ -7,7 +7,8 @@ LIBS += -pthread
 
 SOURCES += hubbard.cc
 
-HEADERS += fciqmc.hh
+HEADERS += fciqmc.hh \
+    mpi_map.hh
 
 QMAKE_CXXFLAGS_RELEASE -= -O
 QMAKE_CXXFLAGS_RELEASE -= -O1

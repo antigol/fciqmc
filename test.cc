@@ -35,46 +35,17 @@ int main(int argc, char* argv[])
 	mpi_map<int, int> ys(mpi_rank, mpi_size);
 
 	map<int, int> xs;
-	xs[10*mpi_rank] = mpi_rank;
-	xs[10*mpi_rank+1] = mpi_rank;
-	xs[10*mpi_rank+2] = mpi_rank;
+	for (int n = 0; n < 12; ++n) {
+		xs.clear();
+		xs[rand()%100] = mpi_rank;
+		xs[rand()%100] = mpi_rank;
+		xs[rand()%100] = mpi_rank;
+		xs[rand()%100] = mpi_rank;
 
-	ys.mpi_sumup(xs);
-
-	for (auto x : ys) {
-		cout << mpi_rank << ':' << x.first << ' ' << x.second << endl;
-	}
-	cout << endl;
-
-	MPI_Barrier(MPI_COMM_WORLD);
-
-
-	xs.clear();
-	xs[mpi_rank+1] = mpi_rank;
-	xs[10*mpi_rank+10] = mpi_rank;
-	xs[100*mpi_rank+100] = mpi_rank;
-
-	ys.mpi_sumup(xs);
-
-	for (auto x : ys) {
-		cout << mpi_rank << ':' << x.first << ' ' << x.second << endl;
-	}
-	cout << endl;
-
-	MPI_Barrier(MPI_COMM_WORLD);
-
-
-	xs.clear();
-	xs[mpi_rank*mpi_rank] = mpi_rank;
-	xs[mpi_rank*mpi_rank+1] = mpi_rank;
-	xs[mpi_rank*mpi_rank+2] = mpi_rank;
-
-	ys.mpi_sumup(xs);
-
-	for (auto x : ys) {
-		cout << mpi_rank << ':' << x.first << ' ' << x.second << endl;
+		ys.sync(xs);
 	}
 
+	cout << mpi_rank << ": " << ys.begin()->first << " -> " << (--ys.end())->first << " (" << ys.size() << ")"<<  endl;
 
 	MPI_Finalize();
 
