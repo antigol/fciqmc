@@ -1,26 +1,10 @@
 #include <map>
 #include <string>
 #include <iostream>
-#include <sstream>
 
 using namespace std;
 
-string serialize(const pair<int,int>& kv)
-{
-	ostringstream oss;
-	oss << kv.first << ' ' << kv.second;
-	return oss.str();
-}
-
-pair<int,int> unserialize(const string& str)
-{
-	istringstream iss(str);
-	pair<int,int> kv;
-	iss >> kv.first >> kv.second;
-	return kv;
-}
-
-#include "mpi_map.hh"
+#include "mpi_data.hh"
 
 int main(int argc, char* argv[])
 {
@@ -32,7 +16,22 @@ int main(int argc, char* argv[])
 	int mpi_rank;
 	MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
-	/*int a = mpi_rank;
+	/*
+	constexpr int n = 10;
+
+	MPI_Datatype mpi_state_type;
+	MPI_Type_contiguous(n, MPI_UINT8_T, &mpi_state_type);
+	MPI_Type_commit(&mpi_state_type);
+
+
+	MPI_Allgather(&beg, 1, mp_type, m_begins.data(), 1, mp_type, MPI_COMM_WORLD);
+
+
+	MPI_Finalize();
+	return 0;
+
+
+	int a = mpi_rank;
 	int b[mpi_size];
 
 	MPI_Allgather(&a, 1, MPI_INT, b, 1, MPI_INT, MPI_COMM_WORLD);
@@ -44,7 +43,7 @@ int main(int argc, char* argv[])
 	MPI_Finalize();
 	return 0;*/
 
-	mpi_map<int> ys(mpi_rank, mpi_size);
+	mpi_data<int> ys(mpi_rank, mpi_size, MPI_INT);
 
 	map<int, int> xs;
 	for (int n = 0; n < 12; ++n) {

@@ -9,6 +9,12 @@
 
 #include "fciqmc.hh"
 
+#define USEMPI
+
+#ifdef USEMPI
+#include "mpi_data.hh"
+#endif
+
 using namespace std;
 
 
@@ -18,30 +24,6 @@ constexpr double U = 10.0;
 constexpr size_t n = 8;
 typedef array<uint8_t, n> state_type;
 
-#define USEMPI
-#ifdef USEMPI
-#include <sstream>
-
-string serialize(const pair<state_type,int>& kv)
-{
-	ostringstream oss;
-	for (size_t k = 0; k < n; ++k) oss << kv.first[k] << ' ';
-	oss << kv.second;
-	return oss.str();
-}
-
-pair<state_type,int> unserialize(const string& str)
-{
-	istringstream iss(str);
-	pair<state_type,int> kv;
-	for (size_t k = 0; k < n; ++k) iss >> kv.first[k];
-	iss >> kv.second;
-	return kv;
-}
-
-#include "mpi_map.hh"
-
-#endif
 
 bool operator<(const state_type& lhs, const state_type& rhs)
 {
@@ -149,11 +131,11 @@ int main(int argc, char* argv[])
 	int mpi_rank;
 	MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
-	//MPI_Datatype mpi_state_type;
-	//MPI_Type_contiguous(n, MPI_UINT8_T, &mpi_state_type);
-	//MPI_Type_commit(&mpi_state_type);
+	MPI_Datatype mpi_state_type;
+	MPI_Type_contiguous(n, MPI_UINT8_T, &mpi_state_type);
+	MPI_Type_commit(&mpi_state_type);
 
-	mpi_map<state_type> walkers(mpi_rank, mpi_size/*,mpi_state_type*/);
+	mpi_data<state_type> walkers(mpi_rank, mpi_size, mpi_state_type);
 	tmp_map[start] = 100;
 	walkers.sync(tmp_map);
 	tmp_map.clear();
@@ -331,6 +313,7 @@ int main(int argc, char* argv[])
 		}
 		MPI_Bcast(&energyshift, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
+		if (iter >= 350) state = 3;
 #else
 
 		// annihilation
