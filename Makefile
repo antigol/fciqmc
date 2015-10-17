@@ -4,7 +4,7 @@ CXXFLAGS=-m64 -pipe -Ofast -march=native -flto -fwhole-program -std=c++0x -Wall 
 
 all: hubbard
 
-hubbard: hubbard.cc
+hubbard: hubbard.cc fciqmc.hh mpi_data.hh
 	$(CC) $(CXXFLAGS) $< -o $@
 
 run: hubbard

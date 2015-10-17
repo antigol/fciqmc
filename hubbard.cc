@@ -54,27 +54,7 @@ double scalar_product(const map<state_type, double>& a,
 	return r;
 }
 
-double scalar_product(const map<state_type, int>& a,
-											const map<state_type, int>& b)
-{
-	double r = 0.0;
-	auto i = a.begin();
-	auto j = b.begin();
-
-	while (i != a.end() && j != b.end()) {
-		if (i->first < j->first) ++i;
-		else if (j->first < i->first) ++j;
-		else {
-			r += (double)i->second * (double)j->second;
-			++i;
-			++j;
-		}
-	}
-
-	return r;
-}
-
-const map<state_type, double> hamiltonian(const map<state_type, int>& ket, vector<size_t> ngh[])
+const map<state_type, double> hamiltonian(const map<state_type, double>& ket, vector<size_t> ngh[])
 {
 	map<state_type, double> hket;
 	for (auto i = ket.begin(); i != ket.end(); ++i) {
@@ -147,10 +127,18 @@ int main(int argc, char* argv[])
 #endif
 
 
-	map<state_type, int> ket;
-	ket[start] = 1;
+	map<state_type, double> ket;
+	ket[start] = 1.0;
 
 	map<state_type, double> hket = hamiltonian(ket, ngh);
+#ifdef USEMPI
+	if (mpi_rank != 0) {
+		ket.clear();
+		hket.clear();
+	}
+	walkers.sync_bis(ket, hket);
+#else
+#endif
 
 	double energyshift = 30;
 	constexpr double dt = 0.01;
@@ -297,6 +285,18 @@ int main(int argc, char* argv[])
 			MPI_Reduce(&count, &count_total_walkers, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 		}
 
+		if (iter == 200) {
+			cout << "compute hamiltonian" << endl;
+			ket.clear();
+			for (const pair<state_type,int>& x : walkers) {
+				ket.insert(make_pair(x.first, double(x.second)));
+			}
+			hket = hamiltonian(ket, ngh);
+			walkers.sync_bis(ket, hket);
+		}
+
+		double energy = walkers.energy();
+
 		if (mpi_rank == 0) {
 			constexpr int A = 3;
 			if (iter > 10 && iter%A == 0) {
@@ -308,8 +308,9 @@ int main(int argc, char* argv[])
 			}
 
 			cout<<"@"<<iter<<": "<<count_total_walkers<<"/"<<walkers.total_size()<<" es="<<energyshift
+				 << " en=" << energy
 				 << endl;
-			ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.total_size()<<' '<<energyshift<<endl;
+			ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.total_size()<<' '<<energyshift<<' '<<energy<<endl;
 		}
 		MPI_Bcast(&energyshift, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
@@ -340,7 +341,10 @@ int main(int argc, char* argv[])
 		if (state == 1) {
 			state = 2;
 			cout << "compute hamiltonian" << endl;
-			ket = walkers;
+			ket.clear();
+			for (const pair<state_type,int>& x : walkers) {
+				ket.insert(make_pair(x.first, double(x.second)));
+			}
 			hket = hamiltonian(ket, ngh);
 		}
 

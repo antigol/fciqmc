@@ -19,13 +19,14 @@ public:
 		m_begins.resize(mp_size);
 	}
 
+	enum {
+		tag_size = 0,
+		tag_key,
+		tag_value
+	};
+
 	void sync(const std::map<K,int>& map)
 	{
-		enum {
-			tag_size = 0,
-			tag_key,
-			tag_value
-		};
 		int value;
 		K key;
 
@@ -162,7 +163,6 @@ public:
 					MPI_Recv(&key, 1, mp_type, src, tag_key, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 					m_local.insert(m_local.begin(), std::make_pair(key, value));
 				}
-
 			}
 		}
 
@@ -176,6 +176,33 @@ public:
 			int size = m_local.size();
 			MPI_Allgather(&size, 1, MPI_INT, m_sizes.data(), 1, MPI_INT, MPI_COMM_WORLD);
 		}
+
+
+		{ // BIS
+			syncXket(m_ket);
+			syncXket(m_hket);
+		}
+	}
+
+	void sync_bis(const std::map<K,double>& ket, const std::map<K,double>& hket)
+	{
+		// send map to other threads.
+		// does not modify begins.
+		sendXket(ket, m_ket);
+		sendXket(hket, m_hket);
+	}
+
+	double energy() const
+	{
+		double a = scalar_product(m_hket, m_local);
+		double b = scalar_product(m_ket, m_local);
+		double sum_a = 1.0;
+		double sum_b = 1.0;
+		MPI_Reduce(&a, &sum_a, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+		MPI_Reduce(&b, &sum_b, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+		double e = sum_a / sum_b; // only rank 0 makes the true computation
+		MPI_Bcast(&e, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+		return e;
 	}
 
 	typename std::map<K,int>::iterator begin() { return m_local.begin(); }
@@ -193,6 +220,124 @@ public:
 	}
 
 private:
+	double scalar_product(const std::map<K, double>& a,
+												const std::map<K, int>& b) const
+	{
+		double r = 0.0;
+		auto i = a.begin();
+		auto j = b.begin();
+
+		while (i != a.end() && j != b.end()) {
+			if (i->first < j->first) ++i;
+			else if (j->first < i->first) ++j;
+			else {
+				r += i->second * (double)j->second;
+				++i;
+				++j;
+			}
+		}
+
+		return r;
+	}
+
+	void sendXket(const std::map<K,double>& ket, std::map<K,double>& mket)
+	{
+		mket.clear();
+
+		double value;
+		K key;
+
+		{ // SEND MAP
+			int dst = 0;
+			for (auto i = ket.begin(); i != ket.end(); ++i) {
+				if (i->second == 0.0) continue;
+
+				// find rank to send data to
+				while (dst+1 < mp_size && m_sizes[dst+1]!=0 && !(i->first<m_begins[dst+1])) ++dst;
+
+				if (dst == mp_rank) {
+					mket[i->first] += i->second;
+				} else {
+					// send to rank
+					MPI_Send((void*)&(i->second), 1, MPI_DOUBLE, dst, tag_value, MPI_COMM_WORLD);
+					MPI_Send((void*)&(i->first), 1, mp_type, dst, tag_key, MPI_COMM_WORLD);
+				}
+			}
+			value = 0.0;
+			for (dst = 0; dst < mp_size; ++dst) {
+				if (dst != mp_rank) {
+					MPI_Send(&value, 1, MPI_DOUBLE, dst, tag_value, MPI_COMM_WORLD);
+				}
+			}
+		}
+
+
+		{ // RECV MAP
+			for (int src = 0; src < mp_size; ++src) {
+				if (src != mp_rank) {
+					while (true) {
+						MPI_Recv(&value, 1, MPI_DOUBLE, src, tag_value, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+						if (value == 0.0) break;
+
+
+						MPI_Recv(&key, 1, mp_type, src, tag_key, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+						mket[key] += value;
+					}
+				}
+			}
+		}
+	}
+
+	void syncXket(std::map<K,double>& mket) {
+		double dvalue;
+		{ // SEND MAP
+			int dst = 0;
+			for (auto i = mket.begin(); i != mket.end(); ) {
+				if (i->second == 0.0) {
+					i = mket.erase(i);
+				} else {
+
+					// find rank to send data to
+					while (dst+1 < mp_size && m_sizes[dst+1]!=0 && !(i->first<m_begins[dst+1])) ++dst;
+
+					if (dst == mp_rank) {
+						// keep it
+						++i;
+					} else {
+						// send to rank
+						MPI_Send((void*)&(i->second), 1, MPI_DOUBLE, dst, tag_value, MPI_COMM_WORLD);
+						MPI_Send((void*)&(i->first), 1, mp_type, dst, tag_key, MPI_COMM_WORLD);
+						i = mket.erase(i);
+					}
+				}
+			}
+			dvalue = 0.0;
+			for (dst = 0; dst < mp_size; ++dst) {
+				if (dst != mp_rank) {
+					MPI_Send(&dvalue, 1, MPI_DOUBLE, dst, tag_value, MPI_COMM_WORLD);
+				}
+			}
+		}
+
+
+		{ // RECV MAP
+			K key;
+			for (int src = 0; src < mp_size; ++src) {
+				if (src != mp_rank) {
+					while (true) {
+						MPI_Recv(&dvalue, 1, MPI_DOUBLE, src, tag_value, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+						if (dvalue == 0.0) break;
+
+
+						MPI_Recv(&key, 1, mp_type, src, tag_key, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+						mket[key] += dvalue;
+					}
+				}
+			}
+		}
+	}
+
+
 	int mp_rank;
 	int mp_size;
 	MPI_Datatype mp_type;
@@ -200,6 +345,8 @@ private:
 	std::vector<int> m_sizes;
 	std::vector<K> m_begins;
 	std::map<K,int> m_local;
+	std::map<K,double> m_ket;
+	std::map<K,double> m_hket;
 };
 
 #endif // MPI_DATA_HH
