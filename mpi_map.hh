@@ -81,7 +81,7 @@ public:
 
 		{ // SEND/RECV SIZES
 			int size = m_local.size();
-			MPI_Allgather(&size, 1, MPI_INT, m_sizes.data(), mp_size, MPI_INT, MPI_COMM_WORLD);
+			MPI_Allgather(&size, 1, MPI_INT, m_sizes.data(), 1, MPI_INT, MPI_COMM_WORLD);
 		}
 
 		{ // SEND TO NEIGHBOUR
@@ -223,7 +223,7 @@ public:
 
 		{ // SEND/RECV SIZES
 			int size = m_local.size();
-			MPI_Allgather(&size, 1, MPI_INT, m_sizes.data(), mp_size, MPI_INT, MPI_COMM_WORLD);
+			MPI_Allgather(&size, 1, MPI_INT, m_sizes.data(), 1, MPI_INT, MPI_COMM_WORLD);
 		}
 	}
 

@@ -32,7 +32,19 @@ int main(int argc, char* argv[])
 	int mpi_rank;
 	MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
-	mpi_map<int, int> ys(mpi_rank, mpi_size);
+	/*int a = mpi_rank;
+	int b[mpi_size];
+
+	MPI_Allgather(&a, 1, MPI_INT, b, 1, MPI_INT, MPI_COMM_WORLD);
+
+	cout << mpi_rank << ": ";
+	for (int i = 0; i < mpi_size; ++i) cout << b[i] << ' ';
+	cout << endl;
+
+	MPI_Finalize();
+	return 0;*/
+
+	mpi_map<int> ys(mpi_rank, mpi_size);
 
 	map<int, int> xs;
 	for (int n = 0; n < 12; ++n) {
