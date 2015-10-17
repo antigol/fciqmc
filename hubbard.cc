@@ -21,12 +21,22 @@ using namespace std;
 
 // H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 constexpr double U = 10.0;
-constexpr size_t n = 8;
+constexpr size_t n = 12;
 typedef array<uint8_t, n> state_type;
 
 
 bool operator<(const state_type& lhs, const state_type& rhs)
 {
+	/*for (size_t k = 0; k < n; ++k) {
+		int l = 0;
+		int r = 0;
+		for (auto x : lhs) if (x > k) ++l;
+		for (auto x : rhs) if (x > k) ++r;
+		if (l < r) return true;
+		if (l > r) return false;
+	}
+	return false;
+*/
 	for (size_t k = 0; k < n; ++k) {
 		if (lhs[k] < rhs[k]) return true;
 		if (lhs[k] > rhs[k]) return false;
@@ -90,7 +100,7 @@ int main(int argc, char* argv[])
 	ofstream ofs("data");
 	ofs<<setprecision(15);
 
-	double time1 = 0.0, time3 = 0.0, time4 = 0.0;
+	double time_spwdg = 0.0, time_sync = 0.0, time_oth = 0.0;
 	double menergy = 0.0;
 
 	vector<size_t> ngh[n];
@@ -116,7 +126,7 @@ int main(int argc, char* argv[])
 	MPI_Type_commit(&mpi_state_type);
 
 	mpi_data<state_type> walkers(mpi_rank, mpi_size, mpi_state_type);
-	tmp_map[start] = 100;
+	tmp_map[start] = 50;
 	walkers.sync(tmp_map);
 	tmp_map.clear();
 #else
@@ -140,7 +150,7 @@ int main(int argc, char* argv[])
 #else
 #endif
 
-	double energyshift = 30;
+	double energyshift = 20;
 	constexpr double dt = 0.01;
 
 
@@ -243,7 +253,6 @@ int main(int argc, char* argv[])
 				i->second += binomial_throw(w_i, p);
 		}
 		auto t2 = chrono::high_resolution_clock::now();
-		auto t3 = chrono::high_resolution_clock::now();
 
 #ifdef USEMPI
 		walkers.sync(tmp_map);
@@ -273,9 +282,21 @@ int main(int argc, char* argv[])
 			walkers[i->first] += i->second;
 		}
 #endif
+
+		// annihilation
+		double count_total_walkers = 0.0;
+		for (auto i = walkers.begin(); i != walkers.end();) {
+			count_total_walkers += abs(i->second);
+			if (i->second == 0) {
+				i = walkers.erase(i);
+			} else {
+				++i;
+			}
+		}
 #endif
 
-		auto t4 = chrono::high_resolution_clock::now();
+		auto t3 = chrono::high_resolution_clock::now();
+
 
 #ifdef USEMPI
 
@@ -311,22 +332,26 @@ int main(int argc, char* argv[])
 				 << " en=" << energy
 				 << endl;
 			ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.total_size()<<' '<<energyshift<<' '<<energy<<endl;
+
+		}
+		if (iter%10 == 0) {
+			double l, r, s;
+			MPI_Reduce(&walkers.sent_left,  &l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+			MPI_Reduce(&walkers.sent_right, &r, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+			MPI_Reduce(&walkers.sent_map,   &s, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+			if (mpi_rank == 0) {
+				l /= iter+1;
+				r /= iter+1;
+				s /= iter+1;
+				cout << "chrono : spwdg"<<round(time_spwdg)<<" +sync"<<round(time_sync)<<" +other"<<round(time_oth)
+						 <<"= "<<round(time_spwdg+time_sync+time_oth)<< "ms " <<round(l)<<"/"<<round(r)<<"/"<<round(s)<<" l/r/s"<< endl;
+			}
 		}
 		MPI_Bcast(&energyshift, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 		if (iter >= 350) state = 3;
 #else
-
-		// annihilation
-		double count_total_walkers = 0.0;
-		for (auto i = walkers.begin(); i != walkers.end();) {
-			count_total_walkers += abs(i->second);
-			if (i->second == 0) {
-				i = walkers.erase(i);
-			} else {
-				++i;
-			}
-		}
 
 		constexpr int A = 3;
 		if (iter > 10 && iter%A == 0) {
@@ -357,16 +382,16 @@ int main(int argc, char* argv[])
 		}
 #endif
 
-		auto t5 = chrono::high_resolution_clock::now();
+		auto t4 = chrono::high_resolution_clock::now();
 
 
-		time1 = (time1 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t2 - t1).count()) / (iter + 1);
-		time3 = (time3 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t4 - t3).count()) / (iter + 1);
-		time4 = (time4 * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t5 - t4).count()) / (iter + 1);
+		time_spwdg = (time_spwdg * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t2 - t1).count()) / (iter + 1);
+		time_sync  = (time_sync  * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t3 - t2).count()) / (iter + 1);
+		time_oth   = (time_oth   * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t4 - t3).count()) / (iter + 1);
 	}
 
-	cout << "chrono : spwdg"<<round(time1)<<" +cgs"<<round(time3)<<" +ann"<<round(time4)
-			 <<"= "<<round(time1+time3+time4)<< " (ms in average)" << endl;
+	cout << "chrono : spwdg"<<round(time_spwdg)<<" +sync"<<round(time_sync)<<" +other"<<round(time_oth)
+			 <<"= "<<round(time_spwdg+time_sync+time_oth)<< " (ms in average)" << endl;
 
 	auto t_end = chrono::high_resolution_clock::now();
 	double t_total = chrono::duration_cast<chrono::duration<double>>(t_end - t_begin).count();

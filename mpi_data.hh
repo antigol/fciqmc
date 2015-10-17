@@ -12,6 +12,8 @@ template<class K>
 class mpi_data
 {
 public:
+	double sent_left = 0, sent_right = 0, sent_map = 0;
+
 	mpi_data(int rank, int size, MPI_Datatype type) :
 		mp_rank(rank), mp_size(size), mp_type(type)
 	{
@@ -41,6 +43,7 @@ public:
 				if (dst == mp_rank) {
 					m_local[i->first] += i->second;
 				} else {
+					sent_map++;
 					// send to rank
 					MPI_Send((void*)&(i->second), 1, MPI_INT, dst, tag_value, MPI_COMM_WORLD);
 					MPI_Send((void*)&(i->first), 1, mp_type, dst, tag_key, MPI_COMM_WORLD);
@@ -108,6 +111,7 @@ public:
 				if (left < tleft) {
 					// send (tleft - left) to the left
 					int sleft = std::min<int>(m_local.size(), tleft - left);
+					sent_left += sleft;
 					// begin by send map.begin
 					auto i = m_local.begin();
 					for (int n = 0; n < sleft; ++n) {
@@ -139,6 +143,7 @@ public:
 			if (dst < mp_size) {
 				if (right < tright) {
 					int sright = std::min<int>(m_local.size(), tright - right);
+					sent_right += sright;
 					// begin by send end
 					auto i = m_local.end();
 					for (int n = 0; n < sright; ++n) {
@@ -304,7 +309,7 @@ private:
 						// keep it
 						++i;
 					} else {
-						// send to rank
+						// send to dst
 						MPI_Send((void*)&(i->second), 1, MPI_DOUBLE, dst, tag_value, MPI_COMM_WORLD);
 						MPI_Send((void*)&(i->first), 1, mp_type, dst, tag_key, MPI_COMM_WORLD);
 						i = mket.erase(i);

@@ -7,7 +7,7 @@
 inline std::default_random_engine& global_random_engine()
 {
 	static std::random_device rdev;
-	static std::default_random_engine eng(0);
+	static std::default_random_engine eng(rdev());
 	return eng;
 }
 
