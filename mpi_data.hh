@@ -32,6 +32,9 @@ public:
 		int value;
 		K key;
 
+		double t1, t2, t3, t4;
+
+		t1 = MPI_Wtime();
 		{ // SEND MAP
 			int dst = 0;
 			for (auto i = map.begin(); i != map.end(); ++i) {
@@ -58,6 +61,7 @@ public:
 		}
 
 
+		t2 = MPI_Wtime();
 		{ // RECV MAP
 			for (int src = 0; src < mp_size; ++src) {
 				if (src != mp_rank) {
@@ -73,6 +77,7 @@ public:
 			}
 		}
 
+		t3 = MPI_Wtime();
 		{ // AHNNIHILATION
 			for (auto i = m_local.begin(); i != m_local.end(); ) {
 				if (i->second == 0) {
@@ -187,6 +192,9 @@ public:
 			syncXket(m_ket);
 			syncXket(m_hket);
 		}
+		t4 = MPI_Wtime();
+
+		std::cout << (t2-t1) << " " << (t3-t2) << " " << (t4-t3) << std::endl;
 	}
 
 	void sync_bis(const std::map<K,double>& ket, const std::map<K,double>& hket)

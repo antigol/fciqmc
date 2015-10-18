@@ -27,16 +27,6 @@ typedef array<uint8_t, n> state_type;
 
 bool operator<(const state_type& lhs, const state_type& rhs)
 {
-	/*for (size_t k = 0; k < n; ++k) {
-		int l = 0;
-		int r = 0;
-		for (auto x : lhs) if (x > k) ++l;
-		for (auto x : rhs) if (x > k) ++r;
-		if (l < r) return true;
-		if (l > r) return false;
-	}
-	return false;
-*/
 	for (size_t k = 0; k < n; ++k) {
 		if (lhs[k] < rhs[k]) return true;
 		if (lhs[k] > rhs[k]) return false;
@@ -101,6 +91,7 @@ int main(int argc, char* argv[])
 	ofs<<setprecision(15);
 
 	double time_spwdg = 0.0, time_sync = 0.0, time_oth = 0.0;
+	double avg_time_spwdg = 0.0, avg_time_sync = 0.0, avg_time_oth = 0.0;
 	double menergy = 0.0;
 
 	vector<size_t> ngh[n];
@@ -139,8 +130,8 @@ int main(int argc, char* argv[])
 
 	map<state_type, double> ket;
 	ket[start] = 1.0;
-
 	map<state_type, double> hket = hamiltonian(ket, ngh);
+
 #ifdef USEMPI
 	if (mpi_rank != 0) {
 		ket.clear();
@@ -384,14 +375,17 @@ int main(int argc, char* argv[])
 
 		auto t4 = chrono::high_resolution_clock::now();
 
+		time_spwdg = 1000.0*chrono::duration_cast<chrono::duration<double>>(t2 - t1).count();
+		time_sync  = 1000.0*chrono::duration_cast<chrono::duration<double>>(t3 - t2).count();
+		time_oth   = 1000.0*chrono::duration_cast<chrono::duration<double>>(t4 - t3).count();
 
-		time_spwdg = (time_spwdg * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t2 - t1).count()) / (iter + 1);
-		time_sync  = (time_sync  * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t3 - t2).count()) / (iter + 1);
-		time_oth   = (time_oth   * iter + 1000.0*chrono::duration_cast<chrono::duration<double>>(t4 - t3).count()) / (iter + 1);
+		avg_time_spwdg = (avg_time_spwdg * iter + time_spwdg) / (iter + 1);
+		avg_time_sync  = (avg_time_sync  * iter + time_sync ) / (iter + 1);
+		avg_time_oth   = (avg_time_oth   * iter + time_oth  ) / (iter + 1);
 	}
 
-	cout << "chrono : spwdg"<<round(time_spwdg)<<" +sync"<<round(time_sync)<<" +other"<<round(time_oth)
-			 <<"= "<<round(time_spwdg+time_sync+time_oth)<< " (ms in average)" << endl;
+	cout << "chrono : spwdg"<<round(avg_time_spwdg)<<" +sync"<<round(avg_time_sync)<<" +other"<<round(avg_time_oth)
+			 <<"= "<<round(avg_time_spwdg+avg_time_sync+avg_time_oth)<< " (ms in average)" << endl;
 
 	auto t_end = chrono::high_resolution_clock::now();
 	double t_total = chrono::duration_cast<chrono::duration<double>>(t_end - t_begin).count();
