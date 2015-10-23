@@ -21,7 +21,7 @@ using namespace std;
 
 // H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 constexpr double U = 10.0;
-constexpr size_t n = 12;
+constexpr size_t n = 11;
 typedef array<uint8_t, n> state_type;
 
 
@@ -288,6 +288,7 @@ int main(int argc, char* argv[])
 
 		auto t3 = chrono::high_resolution_clock::now();
 
+		if (iter >= 120) state = 3;
 
 #ifdef USEMPI
 
@@ -341,7 +342,6 @@ int main(int argc, char* argv[])
 		}
 		MPI_Bcast(&energyshift, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-		if (iter >= 350) state = 3;
 #else
 
 		constexpr int A = 3;
