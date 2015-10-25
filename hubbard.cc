@@ -6,10 +6,11 @@
 #include <iomanip>
 #include <csignal>
 #include <chrono>
+#include <algorithm>
 
 #include "fciqmc.hh"
 
-#define USEMPI
+//#define USEMPI
 
 #ifdef USEMPI
 #include "mpi_data.hh"
@@ -21,7 +22,7 @@ using namespace std;
 
 // H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 constexpr double U = 10.0;
-constexpr size_t n = 11;
+constexpr size_t n = 10;
 typedef array<uint8_t, n> state_type;
 
 
@@ -117,7 +118,7 @@ int main(int argc, char* argv[])
 	MPI_Type_commit(&mpi_state_type);
 
 	mpi_data<state_type> walkers(mpi_rank, mpi_size, mpi_state_type);
-	tmp_map[start] = 50;
+	tmp_map[start] = 5;
 	walkers.sync(tmp_map);
 	tmp_map.clear();
 #else
@@ -169,7 +170,55 @@ int main(int argc, char* argv[])
 
 
 #define BINO
-#ifdef BINO
+#if defined(BINO) && defined(USEMPI)
+			vector<state_type> dst_in, dst_out;
+			vector<double> E_in, E_out;
+			for (size_t k : ks) {
+				for (size_t l : ngh[k]) {
+					state_type ste_j(ste_i);
+					ste_j[k]--;
+					ste_j[l]++;
+					if (walkers.islocal(ste_j)) {
+						dst_in.push_back(ste_j);
+						E_in.push_back(sqrt(ste_i[k] * ste_j[l]));
+					} else {
+						dst_out.push_back(ste_j);
+						E_out.push_back(sqrt(ste_i[k] * ste_j[l]));
+					}
+				}
+			}
+
+			if (dst_in.size() > 0) {
+				int nrm = floor(0.0 * dst_out.size());
+				for (int i = 0; i < nrm; ++i) {
+					dst_out.pop_back();
+					E_out.pop_back();
+				}
+			}
+
+			double advantage = 10.0;
+			int c = abs(w_i);
+
+			double p = dt * (advantage * dst_in.size() + dst_out.size()) / advantage;
+			for (size_t j = 0; j < dst_in.size(); ++j) {
+				if (c == 0) break;
+				binomial_distribution<> dist(c, advantage / (advantage * (dst_in.size() - j) + dst_out.size()));
+				int ckl = dist(global_random_engine());
+				c -= ckl;
+
+				tmp_map[dst_in[j]] += s_i * binomial_throw(ckl, p * E_in[j]);
+			}
+
+			p = dt * (advantage * dst_in.size() + dst_out.size());
+			for (size_t j = 0; j < dst_out.size(); ++j) {
+				if (c == 0) break;
+				binomial_distribution<> dist(c, 1.0 / double(dst_out.size() - j));
+				int ckl = dist(global_random_engine());
+				c -= ckl;
+
+				tmp_map[dst_out[j]] += s_i * binomial_throw(ckl, p * E_out[j]);
+			}
+#elif defined(BINO)
 			int c = abs(w_i);
 			for (size_t ki = 0; ki < ks.size(); ++ki) {
 				if (c == 0) break;
@@ -229,19 +278,21 @@ int main(int argc, char* argv[])
 
 			// H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 			// diagonal part
-			double E = 0.0;
-			for (size_t k = 0; k < n; ++k) {
-				E += ste_i[k] * (ste_i[k] - 1);
-			}
-			E *= U / 2.0;
-			E -= energyshift;
-			// if the energy is negative, then we must clone the walkers.
+			{
+				double E = 0.0;
+				for (size_t k = 0; k < n; ++k) {
+					E += ste_i[k] * (ste_i[k] - 1);
+				}
+				E *= U / 2.0;
+				E -= energyshift;
+				// if the energy is negative, then we must clone the walkers.
 
-			double p = clamp(-1.0, -E * dt, 1.0); // probability to clone(positive value) / kill(negative value)
-			if (w_i < 0)
-				i->second -= binomial_throw(-w_i, p);
-			else
-				i->second += binomial_throw(w_i, p);
+				double p = clamp(-1.0, -E * dt, 1.0); // probability to clone(positive value) / kill(negative value)
+				if (w_i < 0)
+					i->second -= binomial_throw(-w_i, p);
+				else
+					i->second += binomial_throw(w_i, p);
+			}
 		}
 		auto t2 = chrono::high_resolution_clock::now();
 
@@ -288,7 +339,8 @@ int main(int argc, char* argv[])
 
 		auto t3 = chrono::high_resolution_clock::now();
 
-		if (iter >= 120) state = 3;
+		if (iter == 100) state = 1;
+		if (iter >= 130) state = 3;
 
 #ifdef USEMPI
 
@@ -298,7 +350,8 @@ int main(int argc, char* argv[])
 			MPI_Reduce(&count, &count_total_walkers, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 		}
 
-		if (iter == 200) {
+		if (state == 1) {
+			state = 2;
 			cout << "compute hamiltonian" << endl;
 			ket.clear();
 			for (const pair<state_type,int>& x : walkers) {
@@ -309,8 +362,10 @@ int main(int argc, char* argv[])
 		}
 
 		double energy = walkers.energy();
+		menergy = 0.9 * menergy + 0.1 * energy;
 
 		if (mpi_rank == 0) {
+#endif
 			constexpr int A = 3;
 			if (iter > 10 && iter%A == 0) {
 				static double last_count_total_walkers = count_total_walkers;
@@ -319,83 +374,79 @@ int main(int argc, char* argv[])
 				energyshift -= damping / (A * dt) * log(count_total_walkers / last_count_total_walkers);
 				last_count_total_walkers = count_total_walkers;
 			}
+#ifdef USEMPI
 
-			cout<<"@"<<iter<<": "<<count_total_walkers<<"/"<<walkers.total_size()<<" es="<<energyshift
-				 << " en=" << energy
-				 << endl;
-			ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.total_size()<<' '<<energyshift<<' '<<energy<<endl;
-
+			if (iter%2 == 0) {
+				cout<<"@"<<iter<<": "<<count_total_walkers<<"/"<<walkers.total_size()
+					 <<" es="<<energyshift<< " en=" << energy<< endl;
+				ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.total_size()<<' '<<energyshift<<' '<<energy<<endl;
+			}
 		}
-		if (iter%10 == 0) {
+		constexpr int B = 10;
+		if (iter%B == 0) {
 			double l, r, s;
 			MPI_Reduce(&walkers.sent_left,  &l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 			MPI_Reduce(&walkers.sent_right, &r, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 			MPI_Reduce(&walkers.sent_map,   &s, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 
 			if (mpi_rank == 0) {
-				l /= iter+1;
-				r /= iter+1;
-				s /= iter+1;
+				l /= B;
+				r /= B;
+				s /= B;
 				cout << "chrono : spwdg"<<round(time_spwdg)<<" +sync"<<round(time_sync)<<" +other"<<round(time_oth)
 						 <<"= "<<round(time_spwdg+time_sync+time_oth)<< "ms " <<round(l)<<"/"<<round(r)<<"/"<<round(s)<<" l/r/s"<< endl;
 			}
+
+			walkers.sent_left  = 0.0;
+			walkers.sent_right = 0.0;
+			walkers.sent_map   = 0.0;
 		}
 		MPI_Bcast(&energyshift, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 #else
-
-		constexpr int A = 3;
-		if (iter > 10 && iter%A == 0) {
-			static double last_count_total_walkers = count_total_walkers;
-			constexpr double damping = 0.10;
-
-			energyshift -= damping / (A * dt) * log(count_total_walkers / last_count_total_walkers);
-			last_count_total_walkers = count_total_walkers;
-		}
-
-
-		if (state == 1) {
-			state = 2;
-			cout << "compute hamiltonian" << endl;
-			ket.clear();
-			for (const pair<state_type,int>& x : walkers) {
-				ket.insert(make_pair(x.first, double(x.second)));
+			if (state == 1) {
+				state = 2;
+				cout << "compute hamiltonian" << endl;
+				ket.clear();
+				for (const pair<state_type,int>& x : walkers) {
+					ket.insert(make_pair(x.first, double(x.second)));
+				}
+				hket = hamiltonian(ket, ngh);
 			}
-			hket = hamiltonian(ket, ngh);
-		}
 
-		if (iter%2 == 0) {
 			double energy = scalar_product(hket, walkers) / scalar_product(ket, walkers);
 			menergy = 0.75 * menergy + 0.25 * energy;
 
-			cout << "@" << iter << ": " << count_total_walkers << "/" << walkers.size() << " es=" << energyshift << " en=" << energy << endl;
-			ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.size()<<' '<<energyshift<<' '<<energy<<' '<<endl;
-		}
+			if (iter%2 == 0) {
+				cout << "@" << iter << ": " << count_total_walkers << "/" << walkers.size()
+						 << " es=" << energyshift << " en=" << energy << endl;
+				ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.size()<<' '<<energyshift<<' '<<energy<<' '<<endl;
+			}
 #endif
 
-		auto t4 = chrono::high_resolution_clock::now();
+			auto t4 = chrono::high_resolution_clock::now();
 
-		time_spwdg = 1000.0*chrono::duration_cast<chrono::duration<double>>(t2 - t1).count();
-		time_sync  = 1000.0*chrono::duration_cast<chrono::duration<double>>(t3 - t2).count();
-		time_oth   = 1000.0*chrono::duration_cast<chrono::duration<double>>(t4 - t3).count();
+			time_spwdg = 1000.0*chrono::duration_cast<chrono::duration<double>>(t2 - t1).count();
+			time_sync  = 1000.0*chrono::duration_cast<chrono::duration<double>>(t3 - t2).count();
+			time_oth   = 1000.0*chrono::duration_cast<chrono::duration<double>>(t4 - t3).count();
 
-		avg_time_spwdg = (avg_time_spwdg * iter + time_spwdg) / (iter + 1);
-		avg_time_sync  = (avg_time_sync  * iter + time_sync ) / (iter + 1);
-		avg_time_oth   = (avg_time_oth   * iter + time_oth  ) / (iter + 1);
-	}
+			avg_time_spwdg = (avg_time_spwdg * iter + time_spwdg) / (iter + 1);
+			avg_time_sync  = (avg_time_sync  * iter + time_sync ) / (iter + 1);
+			avg_time_oth   = (avg_time_oth   * iter + time_oth  ) / (iter + 1);
+		}
 
-	cout << "chrono : spwdg"<<round(avg_time_spwdg)<<" +sync"<<round(avg_time_sync)<<" +other"<<round(avg_time_oth)
-			 <<"= "<<round(avg_time_spwdg+avg_time_sync+avg_time_oth)<< " (ms in average)" << endl;
+		cout << "chrono : spwdg"<<round(avg_time_spwdg)<<" +sync"<<round(avg_time_sync)<<" +other"<<round(avg_time_oth)
+				 <<"= "<<round(avg_time_spwdg+avg_time_sync+avg_time_oth)<< " (ms in average)" << endl;
 
-	auto t_end = chrono::high_resolution_clock::now();
-	double t_total = chrono::duration_cast<chrono::duration<double>>(t_end - t_begin).count();
-	cout << "Total time : " << t_total << " seconds. Mean energy : " << setprecision(15)<< menergy << endl;
+		auto t_end = chrono::high_resolution_clock::now();
+		double t_total = chrono::duration_cast<chrono::duration<double>>(t_end - t_begin).count();
+		cout << "Total time : " << t_total << " seconds. Mean energy : " << setprecision(15)<< menergy << endl;
 
-	ofs.close();
+		ofs.close();
 
 #ifdef USEMPI
-	//MPI_Type_free(&mpi_state_type);
-	MPI_Finalize();
+		//MPI_Type_free(&mpi_state_type);
+		MPI_Finalize();
 #endif
-	return 0;
-}
+		return 0;
+	}

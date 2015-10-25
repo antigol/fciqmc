@@ -12,6 +12,11 @@ using namespace std;
 
 int main()
 {
+	binomial_distribution<int64_t> a(10, 0.5);
+
+	cout << a(global_random_engine()) << endl;
+
+	return 0;
 	constexpr int n = 3;
 	vector<double> matrix = {
 		//		10.00000,   -2.82843,   0.00000,
