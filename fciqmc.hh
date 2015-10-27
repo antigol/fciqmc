@@ -3,6 +3,7 @@
 
 #include <random>
 #include <cmath>
+#include <map>
 
 inline std::default_random_engine& global_random_engine()
 {
@@ -37,6 +38,27 @@ inline T clamp(T a, T x, T b)
 	if (x < a) return a;
 	if (x > b) return b;
 	return x;
+}
+
+template<class K>
+double scalar_product(const std::map<K, double>& a,
+											const std::map<K, int>& b)
+{
+	double r = 0.0;
+	auto i = a.begin();
+	auto j = b.begin();
+
+	while (i != a.end() && j != b.end()) {
+		if (i->first < j->first) ++i;
+		else if (j->first < i->first) ++j;
+		else {
+			r += i->second * (double)j->second;
+			++i;
+			++j;
+		}
+	}
+
+	return r;
 }
 
 #endif // FCIQMC_HH

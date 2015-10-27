@@ -7,6 +7,7 @@
 #include <iostream>
 #include <utility>
 #include <mpi/mpi.h>
+#include "fciqmc.hh"
 
 template<class K>
 class mpi_data
@@ -240,26 +241,6 @@ public:
 	}
 
 private:
-	double scalar_product(const std::map<K, double>& a,
-												const std::map<K, int>& b) const
-	{
-		double r = 0.0;
-		auto i = a.begin();
-		auto j = b.begin();
-
-		while (i != a.end() && j != b.end()) {
-			if (i->first < j->first) ++i;
-			else if (j->first < i->first) ++j;
-			else {
-				r += i->second * (double)j->second;
-				++i;
-				++j;
-			}
-		}
-
-		return r;
-	}
-
 	void sendXket(const std::map<K,double>& ket, std::map<K,double>& mket)
 	{
 		mket.clear();

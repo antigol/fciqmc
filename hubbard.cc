@@ -10,7 +10,7 @@
 
 #include "fciqmc.hh"
 
-//#define USEMPI
+#define USEMPI
 
 #ifdef USEMPI
 #include "mpi_data.hh"
@@ -22,7 +22,7 @@ using namespace std;
 
 // H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 constexpr double U = 10.0;
-constexpr size_t n = 10;
+constexpr size_t n = 8;
 typedef array<uint8_t, n> state_type;
 
 
@@ -33,26 +33,6 @@ bool operator<(const state_type& lhs, const state_type& rhs)
 		if (lhs[k] > rhs[k]) return false;
 	}
 	return false;
-}
-
-double scalar_product(const map<state_type, double>& a,
-											const map<state_type, int>& b)
-{
-	double r = 0.0;
-	auto i = a.begin();
-	auto j = b.begin();
-
-	while (i != a.end() && j != b.end()) {
-		if (i->first < j->first) ++i;
-		else if (j->first < i->first) ++j;
-		else {
-			r += i->second * (double)j->second;
-			++i;
-			++j;
-		}
-	}
-
-	return r;
 }
 
 const map<state_type, double> hamiltonian(const map<state_type, double>& ket, vector<size_t> ngh[])
@@ -171,19 +151,18 @@ int main(int argc, char* argv[])
 
 #define BINO
 #if defined(BINO) && defined(USEMPI)
-			vector<state_type> dst_in, dst_out;
-			vector<double> E_in, E_out;
+			vector<pair<state_type,double>>
+					dst_in,  // list of connected states which belong to the local data
+					dst_out; //  "        "        "           "      to other threads
 			for (size_t k : ks) {
 				for (size_t l : ngh[k]) {
 					state_type ste_j(ste_i);
 					ste_j[k]--;
 					ste_j[l]++;
 					if (walkers.islocal(ste_j)) {
-						dst_in.push_back(ste_j);
-						E_in.push_back(sqrt(ste_i[k] * ste_j[l]));
+						dst_in.push_back(make_pair(ste_j, sqrt(ste_i[k] * ste_j[l])));
 					} else {
-						dst_out.push_back(ste_j);
-						E_out.push_back(sqrt(ste_i[k] * ste_j[l]));
+						dst_out.push_back(make_pair(ste_j, sqrt(ste_i[k] * ste_j[l])));
 					}
 				}
 			}
@@ -192,7 +171,6 @@ int main(int argc, char* argv[])
 				int nrm = floor(0.0 * dst_out.size());
 				for (int i = 0; i < nrm; ++i) {
 					dst_out.pop_back();
-					E_out.pop_back();
 				}
 			}
 
@@ -206,7 +184,7 @@ int main(int argc, char* argv[])
 				int ckl = dist(global_random_engine());
 				c -= ckl;
 
-				tmp_map[dst_in[j]] += s_i * binomial_throw(ckl, p * E_in[j]);
+				tmp_map[dst_in[j].first] += s_i * binomial_throw(ckl, p * dst_in[j].second);
 			}
 
 			p = dt * (advantage * dst_in.size() + dst_out.size());
@@ -216,7 +194,7 @@ int main(int argc, char* argv[])
 				int ckl = dist(global_random_engine());
 				c -= ckl;
 
-				tmp_map[dst_out[j]] += s_i * binomial_throw(ckl, p * E_out[j]);
+				tmp_map[dst_out[j].first] += s_i * binomial_throw(ckl, p * dst_out[j].second);
 			}
 #elif defined(BINO)
 			int c = abs(w_i);
@@ -343,13 +321,6 @@ int main(int argc, char* argv[])
 		if (iter >= 130) state = 3;
 
 #ifdef USEMPI
-
-		double count_total_walkers = 0.0;
-		{
-			double count = walkers.count();
-			MPI_Reduce(&count, &count_total_walkers, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		}
-
 		if (state == 1) {
 			state = 2;
 			cout << "compute hamiltonian" << endl;
@@ -364,6 +335,11 @@ int main(int argc, char* argv[])
 		double energy = walkers.energy();
 		menergy = 0.9 * menergy + 0.1 * energy;
 
+		double count_total_walkers = 0.0;
+		{
+			double count = walkers.count();
+			MPI_Reduce(&count, &count_total_walkers, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+		}
 		if (mpi_rank == 0) {
 #endif
 			constexpr int A = 3;
