@@ -75,6 +75,8 @@ int main(int argc, char* argv[])
 	double avg_time_spwdg = 0.0, avg_time_sync = 0.0, avg_time_oth = 0.0;
 	double menergy = 0.0;
 
+	double max_proba = 0.0;
+
 	vector<size_t> ngh[n];
 	for (size_t k = 0; k < n; ++k) {
 		ngh[k] = {(k-1+n)%n, (k+1)%n};
@@ -123,7 +125,7 @@ int main(int argc, char* argv[])
 #endif
 
 	double energyshift = 20;
-	constexpr double dt = 0.01;
+	constexpr double dt = 0.015;
 
 
 	vector<size_t> ks;
@@ -143,14 +145,15 @@ int main(int argc, char* argv[])
 			int w_i = i->second;
 			int s_i = (w_i < 0.0) ? -1 : 1;
 
+
+
+#define BINO
+#if defined(BINO) && defined(USEMPI)
 			ks.clear();
 			for (size_t k = 0; k < n; ++k) {
 				if (ste_i[k] != 0) ks.push_back(k);
 			}
 
-
-#define BINO
-#if defined(BINO) && defined(USEMPI)
 			vector<pair<state_type,double>>
 					dst_in,  // list of connected states which belong to the local data
 					dst_out; //  "        "        "           "      to other threads
@@ -201,28 +204,37 @@ int main(int argc, char* argv[])
 			int c = abs(w_i);
 			double p_done = 0.0;
 
-			for (size_t k : ks) {
+			for (size_t k = 0; k < n; ++k) {
+				if (ste_i[k] == 0) continue;
 				for (size_t l : ngh[k]) {
 					if (c == 0) break;
 
-					state_type ste_j(ste_i);
-					ste_j[k]--;
-					ste_j[l]++;
-					double p = dt * sqrt(ste_i[k] * ste_j[l]);
-
-					if (p + p_done > 1.0)
-						cerr << "probability greater than 1" << endl;
+					double p = dt * sqrt(ste_i[k] * (ste_i[l] + 1.0));
 
 					binomial_distribution<> dist(c, p / (1.0 - p_done));
 					int ckl = dist(global_random_engine());
 					c -= ckl;
 					p_done += p;
 
-					tmp_map[ste_j] += s_i * ckl;
+					if (ckl > 0) {
+						state_type ste_j(ste_i);
+						ste_j[k]--;
+						ste_j[l]++;
+						tmp_map[ste_j] += s_i * ckl;
+					}
 				}
 			}
 
+			if (p_done > 1.0)
+				cerr << "probability greater than 1" << endl;
+			max_proba = max(max_proba, p_done);
+
 #else
+			ks.clear();
+			for (size_t k = 0; k < n; ++k) {
+				if (ste_i[k] != 0) ks.push_back(k);
+			}
+
 			uniform_int_distribution<> dist_ks(0, ks.size()-1);
 
 			for (int c = abs(w_i); c > 0; --c) {
@@ -405,6 +417,7 @@ int main(int argc, char* argv[])
 		auto t_end = chrono::high_resolution_clock::now();
 		double t_total = chrono::duration_cast<chrono::duration<double>>(t_end - t_begin).count();
 		cout << "Total time : " << t_total << " seconds. Mean energy : " << setprecision(15)<< menergy << endl;
+		cout << "Max proba = " << max_proba << endl;
 
 		ofs.close();
 
