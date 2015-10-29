@@ -10,7 +10,7 @@
 
 #include "fciqmc.hh"
 
-#define USEMPI
+//#define USEMPI
 
 #ifdef USEMPI
 #include "mpi_data.hh"
@@ -197,40 +197,28 @@ int main(int argc, char* argv[])
 				tmp_map[dst_out[j].first] += s_i * binomial_throw(ckl, p * dst_out[j].second);
 			}
 #elif defined(BINO)
+
 			int c = abs(w_i);
-			for (size_t ki = 0; ki < ks.size(); ++ki) {
-				if (c == 0) break;
+			double p_done = 0.0;
 
-				size_t k = ks[ki];
+			for (size_t k : ks) {
+				for (size_t l : ngh[k]) {
+					if (c == 0) break;
 
-				int ck = c; // number of walkers spawning on <k?>
-				if (ki < ks.size() - 1) {
-					binomial_distribution<> dist_k(c, 1.0 / (double)(ks.size() - ki));
-					ck = dist_k(global_random_engine());
-					c -= ck;
-				}
-
-				for (size_t li = 0; li < ngh[k].size(); ++li) {
-					if (ck == 0) break;
-
-					size_t l = ngh[k][li];
-
-					int ckl = ck; // number of walkers spawning on <kl>
-					if (li < ngh[k].size() - 1) {
-						binomial_distribution<> dist_l(ck, 1.0 / (double)(ngh[k].size() - li));
-						ckl = dist_l(global_random_engine());
-						ck -= ckl;
-					}
-
-					// ckl walkers spawns on connexion <kl> (oriented) with probability (1/ks.size * 1/ngh[k].size)
 					state_type ste_j(ste_i);
 					ste_j[k]--;
 					ste_j[l]++;
+					double p = dt * sqrt(ste_i[k] * ste_j[l]);
 
-					// <i|H|j>  < 0 !
-					// p = - <i|H|j> * dt / P(<ij>)
-					double p = dt * sqrt(ste_i[k] * ste_j[l]) * ks.size() * ngh[k].size();
-					tmp_map[ste_j] += s_i * binomial_throw(ckl, p);
+					if (p + p_done > 1.0)
+						cerr << "probability greater than 1" << endl;
+
+					binomial_distribution<> dist(c, p / (1.0 - p_done));
+					int ckl = dist(global_random_engine());
+					c -= ckl;
+					p_done += p;
+
+					tmp_map[ste_j] += s_i * ckl;
 				}
 			}
 
