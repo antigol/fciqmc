@@ -5,7 +5,7 @@ CONFIG -= qt
 CONFIG += c++11
 LIBS += -pthread
 
-SOURCES += hubbard.cc
+SOURCES += fciqmc.cc
 
 HEADERS += fciqmc.hh \
 	mpi_data.hh

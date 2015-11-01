@@ -10,6 +10,8 @@
 
 #include "fciqmc.hh"
 
+//#define HUBBARD
+
 //#define USEMPI
 
 #ifdef USEMPI
@@ -18,13 +20,15 @@
 
 using namespace std;
 
-
-
+#ifdef HUBBARD
 // H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 constexpr double U = 10.0;
 constexpr size_t n = 8;
 typedef array<uint8_t, n> state_type;
-
+#else
+constexpr size_t n = 16;
+typedef array<int8_t, n> state_type;
+#endif
 
 bool operator<(const state_type& lhs, const state_type& rhs)
 {
@@ -40,7 +44,9 @@ const map<state_type, double> hamiltonian(const map<state_type, double>& ket, ve
 	map<state_type, double> hket;
 	for (auto i = ket.begin(); i != ket.end(); ++i) {
 		const state_type& ste_i = i->first;
+		double A = i->second;
 
+#ifdef HUBBARD
 		double repulsion = 0.0;
 		for (size_t k = 0; k < n; ++k) repulsion += ste_i[k] * (ste_i[k] - 1);
 		hket[ste_i] += U/2.0 * repulsion * i->second;
@@ -55,6 +61,21 @@ const map<state_type, double> hamiltonian(const map<state_type, double>& ket, ve
 				hket[ste_j] += -sqrt(ste_i[k] * ste_j[l]) * i->second;
 			}
 		}
+#else
+		for (size_t k = 0; k < n; ++k) {
+			for (size_t l : ngh[k]) {
+				if (ste_i[k] == ste_i[l]) {
+					hket[ste_i] += A;
+				} else {
+					hket[ste_i] -= A;
+					state_type ste_j(ste_i);
+					ste_j[k] = ste_i[l];
+					ste_j[l] = ste_i[k];
+					hket[ste_j] += 2.0 * A;
+				}
+			}
+		}
+#endif
 	}
 	return hket;
 }
@@ -83,9 +104,16 @@ int main(int argc, char* argv[])
 	}
 
 	state_type start;
+#ifdef HUBBARD
 	for (size_t k = 0; k < n; ++k) {
 		start[k] = 1;
 	}
+#else
+	for (size_t k = 0; k < n; ++k) {
+		if (k % 2 == 0) start[k] = 1;
+		else start[k] = -1;
+	}
+#endif
 	map<state_type, int> tmp_map;
 
 #ifdef USEMPI
@@ -125,7 +153,7 @@ int main(int argc, char* argv[])
 #endif
 
 	double energyshift = 20;
-	constexpr double dt = 0.015;
+	constexpr double dt = 0.005;
 
 
 	vector<size_t> ks;
@@ -204,6 +232,7 @@ int main(int argc, char* argv[])
 			int c = abs(w_i);
 			double p_done = 0.0;
 
+#ifdef HUBBARD
 			for (size_t k = 0; k < n; ++k) {
 				if (ste_i[k] == 0) continue;
 				for (size_t l : ngh[k]) {
@@ -224,6 +253,27 @@ int main(int argc, char* argv[])
 					}
 				}
 			}
+#else
+			for (size_t k = 0; k < n; ++k) {
+				for (size_t l : ngh[k]) {
+					if (c == 0) break;
+					if (ste_i[k] != ste_i[l]) {
+						double p = dt * 2.0;
+						binomial_distribution<> dist(c, p / (1.0 - p_done));
+						int ckl = dist(global_random_engine());
+						c -= ckl;
+						p_done += p;
+
+						if (ckl > 0) {
+							state_type ste_j(ste_i);
+							ste_j[k] = ste_i[l];
+							ste_j[l] = ste_i[k];
+							tmp_map[ste_j] -= s_i * ckl;
+						}
+					}
+				}
+			}
+#endif
 
 			if (p_done > 1.0)
 				cerr << "probability greater than 1" << endl;
@@ -258,14 +308,22 @@ int main(int argc, char* argv[])
 			// diagonal part
 			{
 				double E = 0.0;
+#ifdef HUBBARD
 				for (size_t k = 0; k < n; ++k) {
 					E += ste_i[k] * (ste_i[k] - 1);
 				}
 				E *= U / 2.0;
+#else
+				for (size_t k = 0; k < n; ++k) {
+					for (size_t l : ngh[k])
+						E += ste_i[k] * ste_i[l];
+				}
+#endif
 				E -= energyshift;
 				// if the energy is negative, then we must clone the walkers.
 
 				double p = clamp(-1.0, -E * dt, 1.0); // probability to clone(positive value) / kill(negative value)
+				max_proba = max(max_proba, abs(p));
 				if (w_i < 0)
 					i->second -= binomial_throw(-w_i, p);
 				else
@@ -317,8 +375,8 @@ int main(int argc, char* argv[])
 
 		auto t3 = chrono::high_resolution_clock::now();
 
-		if (iter == 100) state = 1;
-		if (iter >= 130) state = 3;
+		//if (iter == 100) state = 1;
+		//if (iter >= 130) state = 3;
 
 #ifdef USEMPI
 		if (state == 1) {
@@ -385,7 +443,7 @@ int main(int argc, char* argv[])
 				cout << "compute hamiltonian" << endl;
 				ket.clear();
 				for (const pair<state_type,int>& x : walkers) {
-					ket.insert(make_pair(x.first, double(x.second)));
+					ket.insert(ket.end(), make_pair(x.first, double(x.second)));
 				}
 				hket = hamiltonian(ket, ngh);
 			}
