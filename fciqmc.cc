@@ -39,7 +39,11 @@ bool operator<(const state_type& lhs, const state_type& rhs)
 	return false;
 }
 
-const map<state_type, double> hamiltonian(const map<state_type, double>& ket, vector<size_t> ngh[])
+const map<state_type, double>
+hamiltonian(
+		const map<state_type, double>& ket,
+		vector<size_t> ngh[],
+		const vector<pair<size_t,size_t>> &edges)
 {
 	map<state_type, double> hket;
 	for (auto i = ket.begin(); i != ket.end(); ++i) {
@@ -62,17 +66,15 @@ const map<state_type, double> hamiltonian(const map<state_type, double>& ket, ve
 			}
 		}
 #else
-		for (size_t k = 0; k < n; ++k) {
-			for (size_t l : ngh[k]) {
-				if (ste_i[k] == ste_i[l]) {
-					hket[ste_i] += A;
-				} else {
-					hket[ste_i] -= A;
-					state_type ste_j(ste_i);
-					ste_j[k] = ste_i[l];
-					ste_j[l] = ste_i[k];
-					hket[ste_j] += 2.0 * A;
-				}
+		for (pair<size_t,size_t> kl : edges) {
+			if (ste_i[kl.first] == ste_i[kl.second]) {
+				hket[ste_i] += A;
+			} else {
+				hket[ste_i] -= A;
+				state_type ste_j(ste_i);
+				ste_j[kl.first] = ste_i[kl.second];
+				ste_j[kl.second] = ste_i[kl.first];
+				hket[ste_j] += 2.0 * A;
 			}
 		}
 #endif
@@ -101,6 +103,10 @@ int main(int argc, char* argv[])
 	vector<size_t> ngh[n];
 	for (size_t k = 0; k < n; ++k) {
 		ngh[k] = {(k-1+n)%n, (k+1)%n};
+	}
+	vector<pair<size_t,size_t>> edges;
+	for (size_t k = 0; k < n; ++k) {
+		edges.emplace_back(k, (k+1)%n);
 	}
 
 	state_type start;
@@ -141,7 +147,7 @@ int main(int argc, char* argv[])
 
 	map<state_type, double> ket;
 	ket[start] = 1.0;
-	map<state_type, double> hket = hamiltonian(ket, ngh);
+	map<state_type, double> hket = hamiltonian(ket, ngh, edges);
 
 #ifdef USEMPI
 	if (mpi_rank != 0) {
@@ -233,7 +239,7 @@ int main(int argc, char* argv[])
 			double p_done = 0.0;
 
 #ifdef HUBBARD
-			for (size_t k = 0; k < n; ++k) {
+			for (size_t k = 0; k < n; ++k) { // Unidirectionel k -> l
 				if (ste_i[k] == 0) continue;
 				for (size_t l : ngh[k]) {
 					if (c == 0) break;
@@ -254,22 +260,20 @@ int main(int argc, char* argv[])
 				}
 			}
 #else
-			for (size_t k = 0; k < n; ++k) {
-				for (size_t l : ngh[k]) {
-					if (c == 0) break;
-					if (ste_i[k] != ste_i[l]) {
-						double p = dt * 2.0;
-						binomial_distribution<> dist(c, p / (1.0 - p_done));
-						int ckl = dist(global_random_engine());
-						c -= ckl;
-						p_done += p;
+			for (pair<size_t,size_t> kl : edges) { // Bidirectionel k <-> l
+				if (c == 0) break;
+				if (ste_i[kl.first] != ste_i[kl.second]) {
+					double p = dt * 2.0;
+					binomial_distribution<> dist(c, p / (1.0 - p_done));
+					int ckl = dist(global_random_engine());
+					c -= ckl;
+					p_done += p;
 
-						if (ckl > 0) {
-							state_type ste_j(ste_i);
-							ste_j[k] = ste_i[l];
-							ste_j[l] = ste_i[k];
-							tmp_map[ste_j] -= s_i * ckl;
-						}
+					if (ckl > 0) {
+						state_type ste_j(ste_i);
+						ste_j[kl.first] = ste_i[kl.second];
+						ste_j[kl.second] = ste_i[kl.first];
+						tmp_map[ste_j] -= s_i * ckl;
 					}
 				}
 			}
@@ -314,9 +318,8 @@ int main(int argc, char* argv[])
 				}
 				E *= U / 2.0;
 #else
-				for (size_t k = 0; k < n; ++k) {
-					for (size_t l : ngh[k])
-						E += ste_i[k] * ste_i[l];
+				for (pair<size_t,size_t> kl : edges) {
+					E += ste_i[kl.first] * ste_i[kl.second];
 				}
 #endif
 				E -= energyshift;
@@ -445,7 +448,7 @@ int main(int argc, char* argv[])
 				for (const pair<state_type,int>& x : walkers) {
 					ket.insert(ket.end(), make_pair(x.first, double(x.second)));
 				}
-				hket = hamiltonian(ket, ngh);
+				hket = hamiltonian(ket, ngh, edges);
 			}
 
 			double energy = scalar_product(hket, walkers) / scalar_product(ket, walkers);
