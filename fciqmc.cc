@@ -11,6 +11,7 @@
 #include "fciqmc.hh"
 
 //#define HUBBARD
+#define SUN
 
 //#define USEMPI
 
@@ -25,7 +26,11 @@ using namespace std;
 constexpr double U = 10.0;
 constexpr size_t n = 8;
 typedef array<uint8_t, n> state_type;
+#elif defined(SUN)
+#include "youngtableau.hh"
+typedef youngtableau state_type;
 #else
+// H = \sum_{<ij>} \vec{\sigma}_i \cdot \vec{\sigma}_j
 constexpr size_t n = 16;
 typedef array<int8_t, n> state_type;
 #endif
@@ -63,6 +68,38 @@ hamiltonian(
 				ste_j[l]++;
 
 				hket[ste_j] += -sqrt(ste_i[k] * ste_j[l]) * i->second;
+			}
+		}
+#elif defined(SUN)
+		for (size_t i = 0; i < n-1; ++i) {
+			size_t position_i0 = 0;
+			while (ste_i[position_i0] != i) position_i0++;
+			size_t position_i1 = 0;
+			while (ste_i[position_i1] != i+1) position_i1++;
+
+			size_t x0 = position_i0 % (n/N);
+			size_t y0 = position_i0 / (n/N);
+			size_t x1 = position_i1 % (n/N);
+			size_t y1 = position_i1 / (n/N);
+
+			if (y0 == y1) {
+				// same row
+				hket[ste_i] += A;
+			} else if (x0 == x1) {
+				// same column
+				hket[ste_i] -= A;
+			} else /*if (!(x1 > x0 && y1 > y0))*/ { // la condition est toujours vérifiée pour un tableau standard
+				// swaping i with i+1 is a standard Young tableau
+
+				double axial_distance = -(x1 - x0) + (y1 - y0);
+				double rho = 1.0 / axial_distance;
+
+				hket[ste_i] -= rho * A;
+				state_type ste_j(ste_i);
+				ste_j[position_i0] = i+1;
+				ste_j[position_i1] = i;
+
+				hket[ste_j] += std::sqrt(1 - rho * rho) * A;
 			}
 		}
 #else
@@ -113,6 +150,10 @@ int main(int argc, char* argv[])
 #ifdef HUBBARD
 	for (size_t k = 0; k < n; ++k) {
 		start[k] = 1;
+	}
+#elif defined(SUN)
+	for (size_t k = 0; k < n; ++k) {
+		start[k] = k; // Young tableau standard le plus simple.
 	}
 #else
 	for (size_t k = 0; k < n; ++k) {
@@ -259,6 +300,41 @@ int main(int argc, char* argv[])
 					}
 				}
 			}
+#elif defined(SUN)
+			for (size_t i = 0; i < n-1; ++i) {
+				if (c == 0) break;
+
+				size_t position_i0 = 0;
+				while (ste_i[position_i0] != i) position_i0++;
+				size_t position_i1 = 0;
+				while (ste_i[position_i1] != i+1) position_i1++;
+
+				size_t x0 = position_i0 % (n/N);
+				size_t y0 = position_i0 / (n/N);
+				size_t x1 = position_i1 % (n/N);
+				size_t y1 = position_i1 / (n/N);
+
+				if (y0 != y1 && x0 != x1) {
+					// swaping i with i+1 is a standard Young tableau
+
+					double axial_distance = -(x1 - x0) + (y1 - y0);
+					double rho = 1.0 / axial_distance;
+					double p = dt * std::sqrt(1.0 - rho * rho); // énergie positive
+					binomial_distribution<> dist(c, p / (1.0 - p_done));
+					int rand = dist(global_random_engine());
+					c -= rand;
+					p_done += p;
+
+					if (rand > 0) {
+						state_type tableau(ste_i);
+						tableau[position_i0] = i+1;
+						tableau[position_i1] = i;
+						// same sign as the parent if energy < 0
+						tmp_map[tableau] -= s_i * rand;
+					}
+				}
+
+			}
 #else
 			for (pair<size_t,size_t> kl : edges) { // Bidirectionel k <-> l
 				if (c == 0) break;
@@ -308,16 +384,41 @@ int main(int argc, char* argv[])
 			}
 #endif
 
-			// H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 			// diagonal part
 			{
 				double E = 0.0;
 #ifdef HUBBARD
+				// H = - \sum_{<i,j>} b^dag_i b_j + U/2 \sum_i n_i (n_i - 1)
 				for (size_t k = 0; k < n; ++k) {
 					E += ste_i[k] * (ste_i[k] - 1);
 				}
 				E *= U / 2.0;
+#elif defined(SUN)
+				for (size_t i = 0; i < n-1; ++i) {
+					size_t position_i0 = 0;
+					while (ste_i[position_i0] != i) position_i0++;
+					size_t position_i1 = 0;
+					while (ste_i[position_i1] != i+1) position_i1++;
+
+					size_t x0 = position_i0 % (n/N);
+					size_t y0 = position_i0 / (n/N);
+					size_t x1 = position_i1 % (n/N);
+					size_t y1 = position_i1 / (n/N);
+
+					if (y0 == y1) {
+						// same row
+						E += 1.0;
+					} else if (x0 == x1) {
+						E -= 1.0;
+					} else {
+						double axial_distance = -(x1 - x0) + (y1 - y0);
+						double rho = 1.0 / axial_distance;
+						E -= rho;
+					}
+
+				}
 #else
+				// Heisenberg
 				for (pair<size_t,size_t> kl : edges) {
 					E += ste_i[kl.first] * ste_i[kl.second];
 				}
