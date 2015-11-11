@@ -5,8 +5,8 @@
 #include <cstdint>
 #include <array>
 
-constexpr size_t N = 3;   // SU(3)
-constexpr size_t n = N*3; // 9 sites
+constexpr size_t N = 3;   // SU(N)
+constexpr size_t n = N*3; // n sites
 typedef std::array<uint8_t, n> youngtableau; // N lignes de n/N valeurs
 
 // FACTS

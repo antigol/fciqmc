@@ -203,8 +203,10 @@ int main(int argc, char* argv[])
 	constexpr double dt = 0.005;
 
 
+#define BINO
+#if defined(BINO) && defined(USEMPI)
 	vector<size_t> ks;
-	ks.reserve(n);
+#endif
 
 	auto t_begin = chrono::high_resolution_clock::now();
 
@@ -222,7 +224,6 @@ int main(int argc, char* argv[])
 
 
 
-#define BINO
 #if defined(BINO) && defined(USEMPI)
 			ks.clear();
 			for (size_t k = 0; k < n; ++k) {
