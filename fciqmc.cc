@@ -72,15 +72,10 @@ hamiltonian(
 		}
 #elif defined(SUN)
 		for (size_t i = 0; i < n-1; ++i) {
-			size_t position_i0 = 0;
-			while (ste_i[position_i0] != i) position_i0++;
-			size_t position_i1 = 0;
-			while (ste_i[position_i1] != i+1) position_i1++;
-
-			size_t x0 = position_i0 % (n/N);
-			size_t y0 = position_i0 / (n/N);
-			size_t x1 = position_i1 % (n/N);
-			size_t y1 = position_i1 / (n/N);
+			size_t x0 = ste_i[i] % (n/N); // ste_i[i] := position de la valeur i dans le tableau
+			size_t y0 = ste_i[i] / (n/N);
+			size_t x1 = ste_i[i+1] % (n/N);
+			size_t y1 = ste_i[i+1] / (n/N);
 
 			if (y0 == y1) {
 				// same row
@@ -96,8 +91,8 @@ hamiltonian(
 
 				hket[ste_i] -= rho * A;
 				state_type ste_j(ste_i);
-				ste_j[position_i0] = i+1;
-				ste_j[position_i1] = i;
+				ste_j[i] = ste_i[i+1];
+				ste_j[i+1] = ste_i[i];
 
 				hket[ste_j] += std::sqrt(1 - rho * rho) * A;
 			}
@@ -154,6 +149,8 @@ int main(int argc, char* argv[])
 #elif defined(SUN)
 	for (size_t k = 0; k < n; ++k) {
 		start[k] = k; // Young tableau standard le plus simple.
+		// 0   1 2 3 ...
+		// n/N ...
 	}
 #else
 	for (size_t k = 0; k < n; ++k) {
@@ -305,18 +302,13 @@ int main(int argc, char* argv[])
 			for (size_t i = 0; i < n-1; ++i) {
 				if (c == 0) break;
 
-				size_t position_i0 = 0;
-				while (ste_i[position_i0] != i) position_i0++;
-				size_t position_i1 = 0;
-				while (ste_i[position_i1] != i+1) position_i1++;
-
-				size_t x0 = position_i0 % (n/N);
-				size_t y0 = position_i0 / (n/N);
-				size_t x1 = position_i1 % (n/N);
-				size_t y1 = position_i1 / (n/N);
+				size_t x0 = ste_i[i] % (n/N);
+				size_t y0 = ste_i[i] / (n/N);
+				size_t x1 = ste_i[i+1] % (n/N);
+				size_t y1 = ste_i[i+1] / (n/N);
 
 				if (y0 != y1 && x0 != x1) {
-					// swaping i with i+1 is a standard Young tableau
+					// swaping i with i+1 IS (stays) a standard Young tableau
 
 					double axial_distance = -(x1 - x0) + (y1 - y0);
 					double rho = 1.0 / axial_distance;
@@ -328,8 +320,8 @@ int main(int argc, char* argv[])
 
 					if (rand > 0) {
 						state_type tableau(ste_i);
-						tableau[position_i0] = i+1;
-						tableau[position_i1] = i;
+						tableau[i] = ste_i[i+1];
+						tableau[i+1] = ste_i[i];
 						// same sign as the parent if energy < 0
 						tmp_map[tableau] -= s_i * rand;
 					}
@@ -395,16 +387,12 @@ int main(int argc, char* argv[])
 				}
 				E *= U / 2.0;
 #elif defined(SUN)
+				// SU(N)
 				for (size_t i = 0; i < n-1; ++i) {
-					size_t position_i0 = 0;
-					while (ste_i[position_i0] != i) position_i0++;
-					size_t position_i1 = 0;
-					while (ste_i[position_i1] != i+1) position_i1++;
-
-					size_t x0 = position_i0 % (n/N);
-					size_t y0 = position_i0 / (n/N);
-					size_t x1 = position_i1 % (n/N);
-					size_t y1 = position_i1 / (n/N);
+					size_t x0 = ste_i[i] % (n/N);
+					size_t y0 = ste_i[i] / (n/N);
+					size_t x1 = ste_i[i+1] % (n/N);
+					size_t y1 = ste_i[i+1] / (n/N);
 
 					if (y0 == y1) {
 						// same row
@@ -416,7 +404,6 @@ int main(int argc, char* argv[])
 						double rho = 1.0 / axial_distance;
 						E -= rho;
 					}
-
 				}
 #else
 				// Heisenberg
@@ -450,6 +437,7 @@ int main(int argc, char* argv[])
 				if (i->first < j->first) {
 					++i;
 				} else if (j->first < i->first) {
+					// c++11 : The function optimizes its insertion time if position points to the element that will follow the inserted element (or to the end, if it would be the last).
 					walkers.insert(i, *j);
 					++j;
 				} else {
@@ -551,15 +539,16 @@ int main(int argc, char* argv[])
 					ket.insert(ket.end(), make_pair(x.first, double(x.second)));
 				}
 				hket = hamiltonian(ket, ngh, edges);
+				menergy = 0.0;
 			}
 
 			double energy = scalar_product(hket, walkers) / scalar_product(ket, walkers);
-			menergy = 0.75 * menergy + 0.25 * energy;
+			menergy = (1.0-0.125) * menergy + 0.125 * energy;
 
 			if (iter%2 == 0) {
 				cout << "@" << iter << ": " << count_total_walkers << "/" << walkers.size()
-						 << " es=" << energyshift << " en=" << energy << endl;
-				ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.size()<<' '<<energyshift<<' '<<energy<<' '<<endl;
+						 << " es=" << energyshift << " en=" << energy <<endl;
+				ofs<<iter<<' '<<count_total_walkers <<' '<<walkers.size()<<' '<<energyshift<<' '<<energy<<endl;
 			}
 #endif
 
